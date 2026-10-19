@@ -1,7 +1,7 @@
-/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
+﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.0';
+  var CFG = window.CONFIG, VERSION = 'F4.1';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -603,13 +603,19 @@
       '<div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="guardarReg" data-id="' + esc(fila) + '">Guardar</button></div>', true);
   }
   function descReg(cod) {
-    if (!cod) return '';
+    if (!cod) {
+      if (!REG.noReg) return '';
+      return CAT.listo
+        ? '<span class="aviso-in">Este código de barras (' + esc(REG.noReg) + ') <b>no está registrado</b>. Registra el artículo a mano: escribe su código de 6 caracteres.</span>'
+        : '<span class="aviso-in">No se pudo consultar el catálogo (código leído: ' + esc(REG.noReg) + '). Escribe el código del artículo a mano.</span>';
+    }
     var d = descDe(cod); if (d) return esc(d);
     return CAT.listo ? '<span class="aviso-in">Ese código no está en el sistema. Puedes registrarlo igual.</span>' : '';
   }
   function leerRegistro() {
     var g = function (id) { var x = $capa.querySelector('#' + id); return x ? x.value.trim() : ''; };
     REG.cod = g('rk').toUpperCase(); REG.lot = g('rl'); REG.vc = g('rv'); REG.c = g('rc'); REG.o = g('ro');
+    if (REG.cod) REG.noReg = '';   // ya escribió el código a mano: el aviso del código de barras desconocido deja de aplicar
   }
 
   // ---------- cámara: escáner de códigos de barra ----------
@@ -766,7 +772,19 @@
     quedarme: cerrarModal,
     registrar: function (b) { abrirRegistro(b.dataset.id, {}); },
     escanear: function () { abrirCamara('Escanear artículo', ubicarArticulo); },
-    escanearReg: function () { leerRegistro(); var fila = REG.fila; abrirCamara('Escanear código', function (v) { cargarCatalogo().then(function () { var r = resolverCodigo(v); REG.cod = r ? r.a : String(v).toUpperCase(); abrirRegistro(fila); if (!r) toast('Código leído: ' + v + '. No está en el catálogo.'); else if (r.caja) toast('Código de caja. Cuenta unidades sueltas.'); }); }, function () { abrirRegistro(fila); }); },
+    escanearReg: function () {
+      leerRegistro(); var fila = REG.fila;
+      abrirCamara('Escanear código', function (v) {
+        cargarCatalogo().then(function () {
+          var r = resolverCodigo(v), s = String(v).trim();
+          if (r) { REG.cod = r.a; REG.noReg = ''; }
+          else if (/^[A-Za-z0-9]{1,6}$/.test(s)) { REG.cod = s.toUpperCase(); REG.noReg = ''; }   // parece el código del artículo impreso en la etiqueta
+          else { REG.cod = ''; REG.noReg = s; }                                                  // código de barras desconocido: NO se escribe en la casilla del artículo
+          abrirRegistro(fila);
+          if (r && r.caja) toast('Código de caja. Cuenta unidades sueltas.');
+        });
+      }, function () { abrirRegistro(fila); });
+    },
     cerrarCamara: function () { var v = CAM.volver; cerrarModal(); if (v) v(); },
     guardarObs: function (b) {
       var o = (($capa.querySelector('#obs') || {}).value || '').trim();
