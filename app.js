@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.1';
+  var CFG = window.CONFIG, VERSION = 'F4.2';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -29,7 +29,7 @@
   function esActivo(v) { return v === true || String(v).toLowerCase() === 'true'; }
 
   // ---------- comunicación con el servicio ----------
-  var LECTURAS = { avance: 1, cambiosUnidad: 1, articulos: 1, posicionesUnidad: 1, yo: 1, listarUnidades: 1, listarUsuarios: 1, historial: 1, validarDatos: 1 };
+  var LECTURAS = { datosAjuste: 1, avance: 1, cambiosUnidad: 1, articulos: 1, posicionesUnidad: 1, yo: 1, listarUnidades: 1, listarUsuarios: 1, historial: 1, validarDatos: 1 };
   var ESPERAS = [2000, 4000, 8000];            // pausas entre reintentos de lecturas (servidor dormido o celular sin red aún)
   function espera(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function pintarEstado() { var e = document.getElementById('estado'); if (e) e.className = S.lentos > 0 ? 'on' : ''; }
@@ -160,7 +160,7 @@
       .sort(function (a, b) { return ordenNat(a.tipo === 'torre' ? a.torre : a.pasillo, b.tipo === 'torre' ? b.torre : b.pasillo); });
   }
   function filaUnidad(u, modo, bloqueado) {
-    var torre = u.tipo === 'torre', rotulo = torre ? u.torre : u.pasillo;
+    var torre = u.tipo === 'torre', rotulo = u.reconteo ? 'RC' : (torre ? u.torre : u.pasillo);
     var cls = 'u' + (u.mia ? ' mia' : '') + (u.estado === 'Cerrado' || u.estado === 'Ajustado' ? ' cerrado' : '') + (u.estado === 'En conteo' && !u.mia ? ' otro' : '');
     var det = torre ? (u.udcs + ' UDC · ' + u.filas + ' posiciones') : (u.filas + ' posiciones');
     var sub, acc = '';
@@ -168,6 +168,7 @@
     if (u.estado === 'En conteo') det = det + (u.ultimo_movimiento ? ' · ' + hace(u.ultimo_movimiento) : '');
     if (modo === 'contador') {
       if (u.mia) acc = '<button class="btn rel" data-a="tomar" data-id="' + esc(u.id) + '">Continuar</button>';
+      else if (u.estado === 'Pendiente' && u.reconteo && u.puedes_tomar === false) acc = '<span class="est">Lo cuenta otra persona</span>';
       else if (u.estado === 'Pendiente') acc = '<button class="btn" data-a="pedirTomar" data-id="' + esc(u.id) + '"' + (bloqueado ? ' disabled' : '') + '>Tomar</button>';
       else if (u.estado === 'Cerrado' || u.estado === 'Ajustado' || u.estado === 'En ajuste') acc = '<span class="est ok">' + esc(u.estado) + '</span>';
       else acc = '<span class="est">Bloqueado</span>';
@@ -177,21 +178,24 @@
       if (u.estado === 'En conteo') acc = '<div class="acc"><button class="btn peq" data-a="pedirCerrarAdm" data-id="' + id + '">Cerrar</button><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button><button class="btn pel peq" data-a="pedirLiberar" data-id="' + id + '">Liberar</button></div>';
       else if (u.estado === 'Cerrado') acc = '<div class="acc"><span class="est ok">Cerrado</span><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button><button class="btn peq" data-a="pedirReabrir" data-id="' + id + '">Reabrir</button></div>';
       else acc = '<span class="est' + (u.estado === 'Pendiente' ? '' : ' ok') + '">' + esc(u.estado) + '</span>';
+    } else if (modo === 'ajuste') {
+      acc = u.estado === 'Pendiente' ? '<span class="est">Pendiente</span>' : '<button class="btn rel" data-a="abrirAjuste" data-id="' + esc(u.id) + '">Abrir</button>';
     } else { acc = '<span class="est' + (u.estado === 'Pendiente' ? '' : ' ok') + '">' + esc(u.estado) + '</span>'; }
     return '<li class="' + cls + '"><div class="letra' + (torre ? ' torre' : '') + '" aria-hidden="true">' + esc(rotulo) + '</div>' +
-      '<div class="info"><div class="nom">' + esc(torre ? ('Torre ' + u.torre) : ('Pasillo ' + u.pasillo) + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) + '</div><div class="det">' + sub + (u.estado === 'En conteo' ? ' · ' + esc(hace(u.ultimo_movimiento)) : '') + '</div></div>' + acc + '</li>';
+      '<div class="info"><div class="nom">' + esc((u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (torre ? ('Torre ' + u.torre) : ('Pasillo ' + u.pasillo) + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : ''))) + '</div><div class="det">' + sub + (u.estado === 'En conteo' ? ' · ' + esc(hace(u.ultimo_movimiento)) : '') + '</div></div>' + acc + '</li>';
   }
   function vacioToma() {
     return '<div class="vacio"><h2>No hay nada por hacer</h2><p>Todavía no hay una toma de inventario abierta. Cuando el administrador la abra, aparecerá aquí.</p><button class="btn" data-a="recargar">Actualizar</button></div>';
   }
   function resumenBarra(un) {
+    un = un.filter(function (u) { return !u.reconteo; });          // los reconteos no cuentan en el avance de la toma
     var tot = un.length, cer = un.filter(function (u) { return u.estado === 'Cerrado' || u.estado === 'En ajuste' || u.estado === 'Ajustado'; }).length;
     var seg = un.length > 80 ? '' : un.map(function (u) { return '<i class="' + (u.estado === 'Pendiente' ? '' : u.estado === 'En conteo' ? 'a' : 'v') + '"></i>'; }).join('');
     return '<section class="resumen"><h2>' + cer + ' de ' + tot + ' cerradas</h2><div class="sub">' + (tot - cer) + ' por contar</div>' +
       (seg ? '<div class="barra" aria-hidden="true">' + seg + '</div>' : '') + '</section>';
   }
   function listaPorTabs(modo) {
-    var un = S.datos.unidades, tabs = agrupar(un);
+    var un = S.datos.unidades.filter(function (u) { return modo !== 'ajuste' || !u.reconteo; }), tabs = agrupar(un);   // el ajustador ve las unidades originales; los reconteos van dentro
     if (!tabs.length) return vacioToma();
     if (!S.tab || !tabs.some(function (t) { return t.id === S.tab; })) {
       var mia = un.filter(function (u) { return u.mia; })[0];
@@ -212,11 +216,135 @@
     if (!d) cuerpo = cargando(); else if (!d.toma_activa) cuerpo = vacioToma(); else cuerpo = resumenBarra(d.unidades) + listaPorTabs('contador');
     return '<main class="pantalla">' + cabecera('Pasillos', S.ses.usuario + ' · contador') + '<div class="cuerpo">' + cuerpo + '</div></main>';
   }
-  // ---------- AJUSTADOR (solo lectura en F1) ----------
+  // ---------- AJUSTADOR (Fase 4b): lista de pasillos, tabla de ajustes con reconteo y Excel ----------
   function vistaAjustador() {
     var d = S.datos, cuerpo;
-    if (!d) cuerpo = cargando(); else if (!d.toma_activa) cuerpo = vacioToma(); else cuerpo = resumenBarra(d.unidades) + listaPorTabs('lectura') + '<p class="pie">Aquí verás las posiciones confirmadas para ajustar en las próximas fases.</p>';
-    return '<main class="pantalla">' + cabecera('Avance', S.ses.usuario + ' · ajustador') + '<div class="cuerpo">' + cuerpo + '</div></main>';
+    if (!d) cuerpo = cargando(); else if (!d.toma_activa) cuerpo = vacioToma();
+    else cuerpo = listaPorTabs('ajuste') + '<p class="pie">Abre un pasillo ya contado para ver las diferencias, pedir reconteos y descargar el Excel.</p>';
+    return '<main class="pantalla">' + cabecera('Ajustes', S.ses.usuario + ' · ajustador') + '<div class="cuerpo">' + cuerpo + '</div></main>';
+  }
+  var AJ = { id: '', datos: null, sel: {}, filtro: 'todas', cur: null, err: '' };
+  function aCant(v) { return v === null || v === undefined ? '' : String(v); }
+  function aClase(v, s) { return v === null || v === undefined ? '' : (v < s ? ' menos' : (v > s ? ' mas' : '')); }    // rojo: contado menor · azul: mayor · sin color: igual
+  function aRecon(f) { var r = f.reconteos.filter(function (x) { return x.cantidad !== null && x.cantidad !== undefined; }); return r.length ? r[r.length - 1] : null; }
+  function aEnRecon(f) { return f.reconteos.some(function (x) { return x.estado === 'Pendiente' || x.estado === 'En conteo'; }); }
+  function aCod(f) { return f.codigo || f.codigo_reg || ''; }
+  function aLote(f) { return f.codigo ? f.lote : (f.lote_reg || ''); }
+  function aVcto(f) { return f.codigo ? f.vcto : f.vcto_reg; }
+  function aMuestra(f) { return !!f.codigo || !!f.codigo_reg || (f.contado !== null && f.contado > 0); }   // las posiciones vacías sin nada no se muestran
+  function aFiltra(f) {
+    if (!aMuestra(f)) return false;
+    if (AJ.filtro === 'dif') return f.contado !== null && f.contado !== f.sistema;
+    if (AJ.filtro === 'lote') return !!(f.lote_real || f.vcto_real);
+    if (AJ.filtro === 'sin') return !f.estado;
+    return true;
+  }
+  function aFila(f) {
+    var r = aRecon(f), puede = f.contado !== null && !aEnRecon(f), cod = aCod(f);
+    return '<tr data-fila="' + esc(f.id) + '"' + (AJ.cur === f.id ? ' class="sel"' : '') + '>' +
+      '<td class="ck"><input type="checkbox" data-k="' + esc(f.id) + '"' + (AJ.sel[f.id] ? ' checked' : '') + (puede ? '' : ' disabled') + ' aria-label="Recontar ' + esc(cod) + '"></td>' +
+      '<td class="mono">' + esc(cod) + (!f.codigo && cod ? ' <span class="pill am">nuevo</span>' : '') + '</td>' +
+      '<td>' + esc(f.descripcion || (cod && !f.codigo ? 'Registrado por el contador' : '')) + '</td><td>' + esc(f.udc) + '</td><td>' + esc(f.celda) + '</td><td>' + esc(f.pos) + '</td>' +
+      '<td>' + esc(aLote(f)) + '</td><td>' + esc(aVcto(f) ? fmtVcto(aVcto(f)) : '') + '</td>' +
+      '<td class="n">' + aCant(f.sistema) + '</td><td class="n' + aClase(f.contado, f.sistema) + '">' + aCant(f.contado) + '</td>' +
+      '<td class="n' + (r ? aClase(r.cantidad, f.sistema) : '') + '">' + (r ? r.cantidad : (aEnRecon(f) ? '<span class="pill am">en reconteo</span>' : '')) + '</td>' +
+      '<td class="' + (f.lote_real ? 'real' : '') + '">' + esc(f.lote_real || '') + '</td><td class="' + (f.vcto_real ? 'real' : '') + '">' + esc(f.vcto_real ? fmtVcto(f.vcto_real) : '') + '</td>' +
+      '<td class="an"><select data-e="' + esc(f.id) + '" aria-label="Estado"><option value="">—</option><option' + (f.estado === 'Ajustado' ? ' selected' : '') + '>Ajustado</option><option' + (f.estado === 'No ajustado' ? ' selected' : '') + '>No ajustado</option></select></td>' +
+      '<td class="an"><input type="text" data-o="' + esc(f.id) + '" maxlength="200" value="' + esc(f.obs || '') + '" aria-label="Observación"></td></tr>';
+  }
+  function aLectura(f) {
+    var r = aRecon(f), x = '';
+    if (f.contado === null) x = 'Esta posición aún no se contó.';
+    else if (!r) x = f.contado === f.sistema ? 'Sin diferencia.' : 'Aún sin reconteo. Si no estás seguro, marca la casilla Recontar.';
+    else if (r.cantidad === f.sistema && f.contado !== f.sistema) x = 'El primer conteo se equivocó: el reconteo coincide con el sistema. No hay nada que ajustar.';
+    else if (r.cantidad === f.contado) x = f.contado === f.sistema ? 'Sin diferencia: el reconteo confirma el conteo.' : 'Diferencia confirmada: los dos conteos coinciden y difieren del sistema. Se puede ajustar.';
+    else x = 'Los conteos no coinciden entre sí ni con el sistema. Decide tú o pide otro reconteo.';
+    if (f.lote_real || f.vcto_real) x += ' El contador anotó un lote o vencimiento distinto (Lote real ' + (f.lote_real || '—') + ' · Vcto real ' + (f.vcto_real ? fmtVcto(f.vcto_real) : '—') + ').';
+    if (f.obs_contador) x += ' Observación del contador: ' + f.obs_contador + '.';
+    return x;
+  }
+  function ajDetalle(d) {
+    var f = d.filas.filter(function (x) { return x.id === AJ.cur; })[0];
+    if (!f) return '<p class="pie" style="padding:0">Toca una fila para ver su detalle.</p>';
+    var rs = f.reconteos.map(function (r) {
+      return '<div><small>Reconteo ' + r.n + ' · ' + (r.cantidad === null ? (r.estado === 'En conteo' ? 'se está contando' : 'pendiente') : esc(r.usuario)) + '</small><b>' + (r.cantidad === null ? '—' : r.cantidad) + '</b></div>';
+    }).join('');
+    return '<b>' + esc(aCod(f)) + ' · ' + esc(f.descripcion || '') + '</b><div class="ajg"><div><small>Sistema</small><b>' + aCant(f.sistema) + '</b></div><div><small>1.er conteo' + (f.contado_por ? ' · ' + esc(f.contado_por) : '') + '</small><b>' + (f.contado === null ? '—' : f.contado) + '</b></div>' + rs + '</div><div class="lect">' + esc(aLectura(f)) + '</div>';
+  }
+  function ajRecuento(d) {
+    var n = Object.keys(AJ.sel).filter(function (k) { return AJ.sel[k]; }).length;
+    var pe = d.pedidos.map(function (p) { return '<div class="ped">RC-' + p.n + ' · ' + p.posiciones + ' posición(es) · <b>' + (p.estado === 'Cerrado' ? 'Completo' : esc(p.estado)) + '</b>' + (p.contador ? ' · ' + esc(p.contador) : '') + '</div>'; }).join('');
+    return '<div>' + (n ? n + ' posición(es) marcada(s) con la casilla Recontar.' : 'Marca con la casilla las posiciones que no te dan seguridad.') + '</div>' +
+      '<button class="btn rel" data-a="enviarReconteo"' + (n ? '' : ' disabled') + '>' + (n ? 'Enviar ' + n + ' a reconteo' : 'Enviar a reconteo') + '</button>' +
+      (pe ? '<div class="sec" style="padding:10px 0 4px">Pedidos enviados</div>' + pe : '');
+  }
+  function ajusteCuerpo(d) {
+    var filas = d.filas.filter(aMuestra), vis = filas.filter(aFiltra);
+    var dif = filas.filter(function (f) { return f.contado !== null && f.contado !== f.sistema; });
+    var sin = dif.filter(function (f) { return !f.estado; }).length;
+    var chips = [['todas', 'Todas'], ['dif', 'Solo diferencias'], ['lote', 'Lote o vcto distinto'], ['sin', 'Sin marcar']].map(function (x) {
+      return '<button data-a="ajfiltro" data-id="' + x[0] + '" aria-pressed="' + (AJ.filtro === x[0]) + '">' + x[1] + '</button>'; }).join('');
+    return (d.unidad.estado === 'En conteo' ? '<div class="aviso" style="margin:12px 14px 0">Esta unidad todavía se está contando (' + esc(d.unidad.operador) + '). Los números pueden cambiar.</div>' : '') +
+      '<div class="ajbar"><div class="seg" role="group">' + chips + '</div><button class="btn rel" data-a="excel">Descargar Excel</button><button class="ibtn" data-a="ajrecargar" aria-label="Actualizar">↻</button></div>' +
+      '<div class="pie" style="padding:0 14px 8px">' + filas.length + ' posiciones · ' + dif.length + ' con diferencia · ' + sin + ' sin marcar</div>' +
+      '<div class="ajw"><table class="ajt"><thead><tr><th class="ck">Recontar</th><th>Código</th><th>Descripción</th><th>UDC</th><th>Celda</th><th>POS</th><th>Lote</th><th>Vcto</th><th class="n">Sistema</th><th class="n">Contado</th><th class="n">Reconteo</th><th>Lote real</th><th>Vcto real</th><th>Estado</th><th>Obs</th></tr></thead><tbody>' +
+      (vis.length ? vis.map(aFila).join('') : '<tr><td colspan="15" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>' +
+      '<div class="ajpie"><section class="bx"><h3>Detalle de la fila elegida</h3><div id="ajdet">' + ajDetalle(d) + '</div></section><section class="bx"><h3>Reconteo</h3><div id="ajrec">' + ajRecuento(d) + '</div></section></div>';
+  }
+  function vistaAjuste() {
+    var d = AJ.datos, u = d && d.unidad, cuerpo;
+    var titulo = u ? (u.tipo === 'torre' ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo) : 'Ajustes';
+    var sub = u ? (u.tipo === 'torre' ? 'Modula' : 'Nave ' + u.nave + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : '';
+    if (AJ.err && !d) cuerpo = '<div class="vacio"><h2>No se pudo cargar</h2><p>' + esc(AJ.err) + '</p><button class="btn rel" data-a="ajrecargar">Reintentar</button></div>';
+    else if (!d) cuerpo = cargando(); else cuerpo = ajusteCuerpo(d);
+    return '<main class="pantalla">' + cabecera(titulo + ' · Ajustes', sub + (sub ? ' · ' : '') + S.ses.usuario, false, true) + '<div class="cuerpo">' + cuerpo + '</div></main>';
+  }
+  function cargarAjuste(silencioso) {
+    var id = AJ.id;
+    return api('datosAjuste', { id: id }).then(function (r) {
+      if (S.vista !== 'ajuste' || AJ.id !== id) return;
+      if (!r.ok) { if (!AJ.datos) { AJ.err = r.mensaje || 'No se pudo cargar.'; render(); } else if (!silencioso) toast(r.mensaje || 'No se pudo actualizar.'); return; }
+      var antes = JSON.stringify(AJ.datos); AJ.err = ''; AJ.datos = r;
+      r.filas.forEach(function (f) { if (AJ.sel[f.id] && aEnRecon(f)) delete AJ.sel[f.id]; });
+      if (!AJ.cur) { var p = r.filas.filter(aFiltra)[0]; AJ.cur = p ? p.id : null; }
+      if (antes === JSON.stringify(r) && silencioso) return;
+      var a = document.activeElement; if (silencioso && a && a.matches && a.matches('input[type=text],select')) return;   // no se redibuja mientras escribe
+      renderConScroll();
+    });
+  }
+  // Excel: ExcelJS se carga solo al pedirlo (con huella SRI, para que nadie pueda cambiar el archivo de la librería)
+  var EXCELJS = { url: 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js', sri: 'sha512-dlPw+ytv/6JyepmelABrgeYgHI0O+frEwgfnPdXDTOIZz+eDgfW07QXG02/O8COfivBdGNINy+Vex+lYmJ5rxw==' };
+  function cargarExcelJS() {
+    if (window.ExcelJS) return Promise.resolve();
+    return new Promise(function (ok, mal) {
+      var s = document.createElement('script'); s.src = EXCELJS.url; s.integrity = EXCELJS.sri; s.crossOrigin = 'anonymous';
+      s.onload = function () { ok(); }; s.onerror = function () { mal(new Error('No se pudo cargar la librería de Excel. Revisa tu conexión.')); };
+      document.head.appendChild(s);
+    });
+  }
+  function armarExcel(d) {
+    var ws, wb = new window.ExcelJS.Workbook(); ws = wb.addWorksheet('Ajustes', { views: [{ state: 'frozen', ySplit: 1 }] });
+    var cols = [['Código', 12], ['Descripción', 34], ['UDC', 10], ['Celda', 9], ['POS', 7], ['Lote', 13], ['Vcto', 12], ['Cant. sistema', 13], ['Cant. contada', 13], ['Cant. reconteo', 14], ['Lote real', 13], ['Vcto real', 12], ['Estado', 14], ['Obs', 32], ['CLAVE', 22]];
+    ws.columns = cols.map(function (c) { return { header: c[0], width: c[1] }; });
+    var h = ws.getRow(1); h.height = 30; h.alignment = { vertical: 'middle', wrapText: true };
+    h.eachCell(function (c) { c.font = { bold: true, color: { argb: 'FFFFFFFF' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF12275A' } }; });
+    function pinta(c, argb, letra) { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb } }; c.font = { color: { argb: letra } }; }
+    function cantidad(c, v, s) { if (v === null || v === undefined) return; if (v < s) pinta(c, 'FFF7C1C1', 'FF791F1F'); else if (v > s) pinta(c, 'FFB5D4F4', 'FF0C447C'); }   // rojo: menor · azul: mayor · sin color: igual
+    d.filas.filter(aMuestra).forEach(function (f) {
+      var r = aRecon(f);
+      var row = ws.addRow([aCod(f), f.descripcion || '', String(f.udc), f.celda, f.pos, aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema, f.contado, r ? r.cantidad : null, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '', f.estado || '', f.obs || '', f.id]);
+      cantidad(row.getCell(9), f.contado, f.sistema); if (r) cantidad(row.getCell(10), r.cantidad, f.sistema);
+      if (f.lote_real) pinta(row.getCell(11), 'FFFAEEDA', 'FF633806'); if (f.vcto_real) pinta(row.getCell(12), 'FFFAEEDA', 'FF633806');
+      pinta(row.getCell(13), 'FFE6F1FB', 'FF0C447C'); pinta(row.getCell(14), 'FFE6F1FB', 'FF0C447C');
+      row.getCell(13).dataValidation = { type: 'list', allowBlank: true, formulae: ['"Ajustado,No ajustado"'] };
+    });
+    ws.getColumn(15).hidden = true;                       // CLAVE: identifica la posición; el ajustador no la ve
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 15 } };
+    return wb.xlsx.writeBuffer();
+  }
+  function descargarArchivo(buf, nombre) {
+    var a = document.createElement('a'), url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    a.href = url; a.download = nombre; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
   }
 
   // ---------- ADMINISTRADOR ----------
@@ -390,7 +518,8 @@
     Object.keys(srv || {}).forEach(function (fila) {
       var s = srv[fila], k = id + '|' + fila, l = CM[k];
       if (!l || Number(s.t) > l.t) { CM[k] = { k: k, fila: fila, unidad: id, c: Number(s.c), v: s.v ? 1 : 0, t: Number(s.t), sync: 1, usuario: S.ses.usuario, toma: toma };
-      if (s.o) CM[k].o = s.o; if (s.k) { CM[k].cod = s.k; CM[k].lot = s.l || ''; CM[k].vc = s.x || ''; } dbPut('conteos', CM[k]); }
+      if (s.o) CM[k].o = s.o; if (s.k) { CM[k].cod = s.k; CM[k].lot = s.l || ''; CM[k].vc = s.x || ''; }
+      if (s.lr) CM[k].lr = s.lr; if (s.vr) CM[k].vr = s.vr; dbPut('conteos', CM[k]); }
     });
   }
   function cargarConteo() {
@@ -482,6 +611,8 @@
       h = '<div class="cod"><b>' + esc(d.codigo) + '</b>' + (d.reg ? '<span class="pill am">Registrado por ti</span>' : '') + '</div><div class="desc">' + esc(d.desc || (d.reg ? 'Artículo sin descripción' : '')) + '</div>' +
         '<div class="lv">Lote <b>' + esc(d.lote || '—') + '</b> · Vcto <b>' + esc(d.vcto ? fmtVcto(d.vcto) : '—') + '</b> ' + vencTxt(d.vcto) + '</div>';
       if (d.reg) h += '<button class="regbtn" data-a="registrar" data-id="' + esc(f.id) + '">Editar registro</button>';
+      else if (e && (e.lr || e.vr)) h += '<div class="real">Real: Lote <b>' + esc(e.lr || '—') + '</b> · Vcto <b>' + esc(e.vr ? fmtVcto(e.vr) : '—') + '</b> <button class="regbtn" data-a="real" data-id="' + esc(f.id) + '">Editar</button></div>';
+      else h += '<button class="regbtn" data-a="real" data-id="' + esc(f.id) + '">+ Lote o vencimiento distinto</button>';
     }
     if (e && e.o) h += '<div class="obs">Obs: ' + esc(e.o) + '</div>';
     return h;
@@ -505,7 +636,7 @@
   }
   function vistaContar() {
     var d = CT.datos, u = d && d.unidad, torre = u && u.tipo === 'torre';
-    var titulo = u ? (torre ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo) : (nombreUnidad(unidadPorId(S.unidadActual)) || 'Conteo');
+    var titulo = u ? (u.reconteo ? 'Reconteo · ' : '') + (torre ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo) : (nombreUnidad(unidadPorId(S.unidadActual)) || 'Conteo');
     var sub = u ? (torre ? 'Modula' : 'Nave ' + u.nave + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : '';
     if (torre && CT.udc) sub = 'UDC ' + CT.udc;
     var cuerpo;
@@ -557,10 +688,13 @@
     var cod = '', lot = '', vc = '';
     if (extra.cod) { cod = extra.cod; lot = extra.lot || ''; vc = extra.vc || ''; }
     else if (prev && prev.cod && c > 0 && !v && extra.mantener) { cod = prev.cod; lot = prev.lot; vc = prev.vc; }
-    if (prev && prev.c === c && prev.v === v && (prev.o || '') === o && (prev.cod || '') === cod && (prev.lot || '') === lot && (prev.vc || '') === vc) return;
+    // lote y vcto reales (los que vio distintos al sistema): se conservan mientras la cantidad siga siendo mayor a 0
+    var lr = '', vr = '';
+    if (c > 0 && !v && !cod) { lr = extra.lr !== undefined ? extra.lr : (prev && prev.lr) || ''; vr = extra.vr !== undefined ? extra.vr : (prev && prev.vr) || ''; }
+    if (prev && prev.c === c && prev.v === v && (prev.o || '') === o && (prev.cod || '') === cod && (prev.lot || '') === lot && (prev.vc || '') === vc && (prev.lr || '') === lr && (prev.vr || '') === vr) return;
     var t = Math.max(Date.now(), prev ? prev.t + 1 : 0);
     var e = { k: k, fila: fila, unidad: S.unidadActual, c: c, v: v, t: t, sync: 0, usuario: S.ses.usuario, toma: CT.toma };
-    if (o) e.o = o; if (cod) { e.cod = cod; e.lot = lot; e.vc = vc; }
+    if (o) e.o = o; if (cod) { e.cod = cod; e.lot = lot; e.vc = vc; } if (lr) e.lr = lr; if (vr) e.vr = vr;
     CM[k] = e; dbPut('conteos', e); pintarFila(fila); pintarChip(); programarFlush();
   }
   function filaDatos(id) { return (CT.datos ? CT.datos.filas : []).filter(function (x) { return x.id === id; })[0]; }
@@ -584,6 +718,17 @@
     modal('<h3>' + (dias < 0 ? 'Producto vencido' : 'Revisar fecha de vencimiento') + '</h3><p>' + esc(d.codigo) + ' · Vcto ' + esc(fmtVcto(d.vcto)) + ' (' + (dias < 0 ? 'hace ' + (-dias) + ' d' : dias === 0 ? 'hoy' : 'en ' + dias + ' d') + '). Escribe una observación para guardar ' + n + ' unidades.</p>' +
       '<div class="campo"><label for="obs">Observación</label><input id="obs" maxlength="200" autocomplete="off" placeholder="Ej.: caja golpeada, se separó para devolución"></div><div id="msg"></div>' +
       '<div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="guardarObs" data-id="' + esc(fila) + '" data-n="' + n + '">Guardar</button></div>', true);
+  }
+
+  // ---------- lote o vencimiento distinto al del sistema (opcional; el ajustador lo ve en su pantalla) ----------
+  function abrirReal(fila) {
+    var e = entradaDe(fila), f = filaDatos(fila);
+    if (!e || e.v || e.c < 1) return toast('Primero escribe la cantidad de esta posición (mayor a 0).');
+    modal('<h3>Lote o vencimiento distinto</h3><p>Posición <b>' + esc(f ? f.pos : '') + '</b>. Escribe lo que ves en la caja si no coincide con lo que muestra la lista. Puedes llenar solo uno.</p>' +
+      '<div class="campo"><label for="rlr">Lote real</label><input id="rlr" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="30" value="' + esc(e.lr || '') + '"></div>' +
+      '<div class="campo"><label for="rvr">Vencimiento real</label><input id="rvr" type="date" min="2000-01-01" max="2100-12-31" value="' + esc(e.vr || '') + '"></div>' +
+      '<div class="campo" id="rob" hidden><label for="rob2">Observación (vence en menos de ' + DIAS_ALERTA + ' días o ya venció)</label><input id="rob2" maxlength="200" autocomplete="off" value="' + esc(e.o || '') + '"></div>' +
+      '<div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="guardarReal" data-id="' + esc(fila) + '">Guardar</button></div>', true);
   }
 
   // ---------- registrar producto en una posición sin artículo ----------
@@ -683,7 +828,7 @@
       function lote(i) {
         if (i >= lista.length) return Promise.resolve(true);
         var parte = lista.slice(i, i + 100);
-        function item(e) { var o = { fila: e.fila, cantidad: e.c, vacia: !!e.v, ts: e.t }; if (e.o) o.obs = e.o; if (e.cod) { o.codigo = e.cod; o.lote = e.lot; o.vcto = e.vc; } return o; }
+        function item(e) { var o = { fila: e.fila, cantidad: e.c, vacia: !!e.v, ts: e.t }; if (e.o) o.obs = e.o; if (e.cod) { o.codigo = e.cod; o.lote = e.lot; o.vcto = e.vc; } if (e.lr) o.lote_real = e.lr; if (e.vr) o.vcto_real = e.vr; return o; }
         function enviar(p) {
           return api('guardarConteos', { id: uid, toma: p[0].toma || '', items: p.map(item) }).then(function (r) {
             if (r.ok) {
@@ -696,7 +841,7 @@
               SY.bloq[uid] = true; if (S.vista === 'contar' && S.unidadActual === uid) { CT.perdida = r.mensaje; render(); } else toast(r.mensaje);
               return 'otra';
             }
-            if (/^(fila_invalida|cantidad_invalida|lote_grande|falta_registro|registro_no_permitido|registro_sin_cantidad|codigo_invalido|lote_invalido|vcto_invalido|obs_requerida)$/.test(r.error)) {
+            if (/^(fila_invalida|cantidad_invalida|lote_grande|falta_registro|registro_no_permitido|registro_sin_cantidad|codigo_invalido|lote_invalido|vcto_invalido|obs_requerida|real_no_permitido|real_sin_cantidad|lote_real_invalido|vcto_real_invalido)$/.test(r.error)) {
               if (p.length > 1) {                                 // un conteo malo no debe frenar a los buenos: se envían de uno en uno
                 var seq = Promise.resolve('ok');
                 p.forEach(function (e) { seq = seq.then(function (est) { return est === 'ok' || est === 'mal' ? enviar([e]).then(function (x) { return x === 'mal' ? 'ok' : x; }) : est; }); });
@@ -729,11 +874,12 @@
     if (!S.ses) h = vistaLogin();
     else if (S.vista === 'pin') h = vistaPin();
     else if (S.vista === 'contar') h = vistaContar();
+    else if (S.vista === 'ajuste') h = vistaAjuste();
     else if (S.ses.rol === 'administrador') h = vistaAdmin();
     else if (S.ses.rol === 'contador') h = vistaContador();
     else if (S.ses.rol === 'ajustador') h = vistaAjustador();
     else h = '<main class="pantalla"><div class="vacio"><h2>Rol no reconocido</h2><p>Avisa al administrador.</p><button class="btn" data-a="salir">Cerrar sesión</button></div></main>';
-    $app.innerHTML = h;
+    $app.innerHTML = h; $app.classList.toggle('ancho', S.vista === 'ajuste');   // la tabla del ajustador usa todo el ancho de la pantalla
   }
   function renderConScroll() {
     if (S.vista === 'contar') { pintarChip(); return; }
@@ -749,7 +895,7 @@
     modal('<h3>' + esc(titulo) + '</h3><p>' + esc(texto) + '</p>' + (extra || '') + '<div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="' + accion + '" data-id="' + esc(id || '') + '">' + esc(etiqueta) + '</button></div>');
   }
   function unidadPorId(id) { return (S.datos ? S.datos.unidades : []).filter(function (u) { return u.id === id; })[0]; }
-  function nombreUnidad(u) { return u ? (u.tipo === 'torre' ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo + ' · Nave ' + u.nave + (u.zona ? ' ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : ''; }
+  function nombreUnidad(u) { return u ? (u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (u.tipo === 'torre' ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo + ' · Nave ' + u.nave + (u.zona ? ' ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : ''; }
 
   var ACC = {
     tab: function (b) { S.tab = b.dataset.id; S.zona = null; render(); },
@@ -791,6 +937,35 @@
       if (o.length < 3) return mostrarError(null, 'Escribe una observación (mínimo 3 letras).');
       var fila = b.dataset.id, n = parseInt(b.dataset.n, 10); cerrarModal(); ponerConteo(fila, n, 0, { o: o, mantener: true });
       var i = document.querySelector('input[data-q="' + fila + '"]'); if (i) i.value = String(n);
+    },
+    abrirAjuste: function (b) { AJ = { id: b.dataset.id, datos: null, sel: {}, filtro: 'todas', cur: null, err: '' }; S.vista = 'ajuste'; render(); window.scrollTo(0, 0); cargarAjuste(); },
+    ajrecargar: function () { AJ.err = ''; if (!AJ.datos) render(); cargarAjuste(); },
+    ajfiltro: function (b) { AJ.filtro = b.dataset.id; renderConScroll(); },
+    enviarReconteo: function (b) {
+      var filas = Object.keys(AJ.sel).filter(function (k) { return AJ.sel[k]; });
+      if (!filas.length) return toast('Marca al menos una posición.');
+      ocupar(b, 'Enviando…');
+      api('pedirReconteo', { id: AJ.id, filas: filas }).then(function (r) {
+        liberarBoton(b);
+        if (!r.ok) return toast(r.mensaje || 'No se pudo enviar el reconteo.');
+        AJ.sel = {}; toast('Reconteo RC-' + r.pedido + ' enviado (' + r.posiciones + ' posiciones).'); cargarAjuste();
+      });
+    },
+    excel: function (b) {
+      var d = AJ.datos; if (!d) return; ocupar(b, 'Preparando…');
+      cargarExcelJS().then(function () { return armarExcel(d); }).then(function (buf) {
+        var u = d.unidad, hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
+        descargarArchivo(buf, 'Ajustes_' + (u.tipo === 'torre' ? 'Torre' + u.torre : 'Pasillo' + u.pasillo + '_Nave' + u.nave) + '_' + hoy + '.xlsx'); liberarBoton(b);
+      }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el Excel.'); });
+    },
+    real: function (b) { abrirReal(b.dataset.id); },
+    guardarReal: function (b) {
+      var g = function (id) { var x = $capa.querySelector('#' + id); return x ? x.value.trim() : ''; };
+      var fila = b.dataset.id, e = entradaDe(fila), lr = g('rlr').toUpperCase(), vr = g('rvr'), o = g('rob2');
+      if (!e || e.v || e.c < 1) return mostrarError(null, 'Primero escribe la cantidad de esta posición.');
+      if (vr && (!/^\d{4}-\d{2}-\d{2}$/.test(vr) || diasHasta(vr) === null)) return mostrarError(null, 'Escribe el vencimiento con día, mes y año.');
+      if (vr && vencCorto(vr) && (o || e.o || '').length < 3) { var w = $capa.querySelector('#rob'); if (w) w.hidden = false; return mostrarError(null, 'Ese vencimiento es menor a ' + DIAS_ALERTA + ' días o ya venció: escribe una observación.'); }
+      cerrarModal(); ponerConteo(fila, e.c, 0, { lr: lr, vr: vr, o: o || undefined, mantener: true });
     },
     guardarReg: function (b) {
       leerRegistro(); var fila = b.dataset.id, n = /^\d{1,6}$/.test(REG.c) ? parseInt(REG.c, 10) : 0;
@@ -999,6 +1174,22 @@
     if (i.id === 'rk') { var d = document.getElementById('rdesc'); if (d) d.innerHTML = descReg(i.value.trim().toUpperCase()); }
     if (i.id === 'rv') { var w = document.getElementById('robsw'); if (w) w.hidden = !vencCorto(i.value); }
   });
+  // pantalla del ajustador: casillas de reconteo, estado y observación, y fila elegida
+  document.addEventListener('change', function (e) {
+    var i = e.target; if (S.vista !== 'ajuste' || !AJ.datos || !i.matches) return;
+    if (i.matches('input[data-k]')) { AJ.sel[i.dataset.k] = i.checked; var rc = document.getElementById('ajrec'); if (rc) rc.innerHTML = ajRecuento(AJ.datos); return; }
+    var id = i.dataset.e || i.dataset.o; if (!id) return;
+    var f = AJ.datos.filas.filter(function (x) { return x.id === id; })[0]; if (!f) return;
+    if (i.dataset.e) f.estado = i.value || null; else f.obs = i.value.trim();
+    api('anotarAjustes', { items: [{ fila: id, estado: f.estado || '', obs: f.obs || '' }] }).then(function (r) { if (!r.ok) toast(r.mensaje || 'No se pudo guardar la anotación.'); });
+  });
+  document.addEventListener('click', function (e) {
+    if (S.vista !== 'ajuste' || !AJ.datos) return;
+    var tr = e.target.closest ? e.target.closest('tr[data-fila]') : null; if (!tr || e.target.closest('input,select,button')) return;
+    AJ.cur = tr.dataset.fila; document.querySelectorAll('tr.sel').forEach(function (x) { x.classList.remove('sel'); }); tr.classList.add('sel');
+    var p = document.getElementById('ajdet'); if (p) p.innerHTML = ajDetalle(AJ.datos);
+  });
+  setInterval(function () { if (!document.hidden && S.ses && S.vista === 'ajuste' && $capa.className !== 'on') cargarAjuste(true); }, (CFG.REFRESCO_SEG || 20) * 1000);
   document.addEventListener('visibilitychange', function () { if (document.hidden) flush(true); });
   window.addEventListener('pagehide', function () { flush(true); });
   window.addEventListener('offline', function () { S.online = false; renderConScroll(); });
@@ -1026,7 +1217,7 @@
   function alAtras() {
     if ($capa.className === 'on') { cerrarModal(); return; }
     if (!S.ses) return preguntarSalida();
-    if (S.vista === 'contar') return ACC.atras();
+    if (S.vista === 'contar' || S.vista === 'ajuste') return ACC.atras();
     if (S.vista === 'pin') { if (S.ses.debe) { toast('Primero cambia tu PIN.'); return; } S.vista = 'home'; render(); cargarSegunVista(); return; }
     if (S.ses.rol === 'administrador' && S.adminTab !== 'avance') { S.adminTab = 'avance'; S.errCarga = ''; render(); cargarSegunVista(); return; }
     preguntarSalida();

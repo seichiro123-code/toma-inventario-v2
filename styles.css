@@ -196,3 +196,27 @@ button{cursor:pointer}
 /* F4.0: cuadros de pegado */
 .campo textarea{width:100%;min-height:120px;padding:12px 14px;border-radius:6px;background:var(--pan);border:1.5px solid var(--line);font-size:15px;font-family:var(--f-mono);resize:vertical;color:inherit}
 .campo textarea:focus{border-color:var(--amb);outline:none}
+
+/* F4.2: lote/vcto real del contador y pantalla del ajustador */
+.real{margin-top:6px;font-size:13px;color:var(--amb)} .real b{font-weight:600}
+#app.ancho{max-width:none}
+.ajbar{display:flex;gap:10px;align-items:center;padding:0 14px}
+.ajbar .seg{flex:1;margin:12px 0}
+.ajw{overflow-x:auto;margin:0 14px}
+.ajt{border-collapse:collapse;min-width:1040px;width:100%;font-size:14px}
+.ajt th{background:var(--azulbg);color:var(--tx);font-weight:600;text-align:left;padding:8px 7px;border:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
+.ajt td{padding:6px 7px;border:1px solid var(--line);white-space:nowrap}
+.ajt tbody tr{cursor:pointer}
+.ajt tbody tr.sel td{outline:2px solid var(--azul2);outline-offset:-2px}
+.ajt .n{text-align:right;font-family:var(--f-mono)} .ajt .ck{text-align:center} .ajt .mono{font-family:var(--f-mono)}
+.ajt .menos{background:#5a1d1f;color:#ffc9c9} .ajt .mas{background:#1b3f86;color:#d6e4ff}
+.ajt .real{background:var(--ambbg);color:#ffe3a0}
+.ajt .an{background:#10223f}
+.ajt .an select,.ajt .an input{width:100%;min-width:110px;min-height:32px;padding:0 6px;border-radius:4px;background:var(--pan);border:1px solid var(--line);font-size:14px;color:var(--tx)}
+.ajt input[type=checkbox]{width:20px;height:20px}
+.ajpie{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;padding:14px}
+.bx{background:var(--pan);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.bx h3{margin:0 0 8px;font:700 20px var(--f-cond)}
+.ajg{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:8px 0}
+.ajg>div{background:var(--pan2);border-radius:6px;padding:8px 10px} .ajg small{display:block;color:var(--tx2);font-size:12px} .ajg b{font:700 22px var(--f-mono)}
+.lect{color:var(--tx2);font-size:14px} .ped{font-size:14px;padding:3px 0}
