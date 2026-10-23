@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.2';
+  var CFG = window.CONFIG, VERSION = 'F4.2.2';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -236,7 +236,7 @@
     if (!aMuestra(f)) return false;
     if (AJ.filtro === 'dif') return f.contado !== null && f.contado !== f.sistema;
     if (AJ.filtro === 'lote') return !!(f.lote_real || f.vcto_real);
-    if (AJ.filtro === 'sin') return !f.estado;
+    if (AJ.filtro === 'sin') return f.contado !== null && f.contado !== f.sistema && !f.estado;   // pendientes de marcar = con diferencia y sin Estado (igual que el resumen)
     return true;
   }
   function aFila(f) {
