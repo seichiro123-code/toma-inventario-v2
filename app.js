@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.2.2';
+  var CFG = window.CONFIG, VERSION = 'F4.3';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -223,7 +223,7 @@
     else cuerpo = listaPorTabs('ajuste') + '<p class="pie">Abre un pasillo ya contado para ver las diferencias, pedir reconteos y descargar el Excel.</p>';
     return '<main class="pantalla">' + cabecera('Ajustes', S.ses.usuario + ' · ajustador') + '<div class="cuerpo">' + cuerpo + '</div></main>';
   }
-  var AJ = { id: '', datos: null, sel: {}, filtro: 'todas', cur: null, err: '' };
+  var AJ = { id: '', datos: null, sel: {}, filtro: 'todas', cur: null, err: '', verCompletos: false };
   function aCant(v) { return v === null || v === undefined ? '' : String(v); }
   function aClase(v, s) { return v === null || v === undefined ? '' : (v < s ? ' menos' : (v > s ? ' mas' : '')); }    // rojo: contado menor · azul: mayor · sin color: igual
   function aRecon(f) { var r = f.reconteos.filter(function (x) { return x.cantidad !== null && x.cantidad !== undefined; }); return r.length ? r[r.length - 1] : null; }
@@ -273,10 +273,13 @@
   }
   function ajRecuento(d) {
     var n = Object.keys(AJ.sel).filter(function (k) { return AJ.sel[k]; }).length;
-    var pe = d.pedidos.map(function (p) { return '<div class="ped">RC-' + p.n + ' · ' + p.posiciones + ' posición(es) · <b>' + (p.estado === 'Cerrado' ? 'Completo' : esc(p.estado)) + '</b>' + (p.contador ? ' · ' + esc(p.contador) : '') + '</div>'; }).join('');
+    // Solo se muestran los pedidos que faltan (pendientes o en conteo); los completos se esconden y se ven con el interruptor.
+    var completos = d.pedidos.filter(function (p) { return p.estado === 'Cerrado'; }).length;
+    var pe = d.pedidos.filter(function (p) { return AJ.verCompletos || p.estado !== 'Cerrado'; }).map(function (p) { return '<div class="ped">RC-' + p.n + ' · ' + p.posiciones + ' posición(es) · <b>' + (p.estado === 'Cerrado' ? 'Completo' : esc(p.estado)) + '</b>' + (p.contador ? ' · ' + esc(p.contador) : '') + '</div>'; }).join('');
     return '<div>' + (n ? n + ' posición(es) marcada(s) con la casilla Recontar.' : 'Marca con la casilla las posiciones que no te dan seguridad.') + '</div>' +
       '<button class="btn rel" data-a="enviarReconteo"' + (n ? '' : ' disabled') + '>' + (n ? 'Enviar ' + n + ' a reconteo' : 'Enviar a reconteo') + '</button>' +
-      (pe ? '<div class="sec" style="padding:10px 0 4px">Pedidos enviados</div>' + pe : '');
+      (d.pedidos.length ? '<div class="sec" style="padding:10px 0 4px">Pedidos enviados</div>' + (pe || '<div class="ped">No hay pedidos pendientes.</div>') +
+        (completos ? '<label class="ped" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-vc' + (AJ.verCompletos ? ' checked' : '') + '> Ver también los completos (' + completos + ')</label>' : '') : '');
   }
   function ajusteCuerpo(d) {
     var filas = d.filas.filter(aMuestra), vis = filas.filter(aFiltra);
@@ -938,7 +941,7 @@
       var fila = b.dataset.id, n = parseInt(b.dataset.n, 10); cerrarModal(); ponerConteo(fila, n, 0, { o: o, mantener: true });
       var i = document.querySelector('input[data-q="' + fila + '"]'); if (i) i.value = String(n);
     },
-    abrirAjuste: function (b) { AJ = { id: b.dataset.id, datos: null, sel: {}, filtro: 'todas', cur: null, err: '' }; S.vista = 'ajuste'; render(); window.scrollTo(0, 0); cargarAjuste(); },
+    abrirAjuste: function (b) { AJ = { id: b.dataset.id, datos: null, sel: {}, filtro: 'todas', cur: null, err: '', verCompletos: false }; S.vista = 'ajuste'; render(); window.scrollTo(0, 0); cargarAjuste(); },
     ajrecargar: function () { AJ.err = ''; if (!AJ.datos) render(); cargarAjuste(); },
     ajfiltro: function (b) { AJ.filtro = b.dataset.id; renderConScroll(); },
     enviarReconteo: function (b) {
@@ -1177,6 +1180,7 @@
   // pantalla del ajustador: casillas de reconteo, estado y observación, y fila elegida
   document.addEventListener('change', function (e) {
     var i = e.target; if (S.vista !== 'ajuste' || !AJ.datos || !i.matches) return;
+    if (i.matches('input[data-vc]')) { AJ.verCompletos = i.checked; var rv = document.getElementById('ajrec'); if (rv) rv.innerHTML = ajRecuento(AJ.datos); return; }
     if (i.matches('input[data-k]')) { AJ.sel[i.dataset.k] = i.checked; var rc = document.getElementById('ajrec'); if (rc) rc.innerHTML = ajRecuento(AJ.datos); return; }
     var id = i.dataset.e || i.dataset.o; if (!id) return;
     var f = AJ.datos.filas.filter(function (x) { return x.id === id; })[0]; if (!f) return;
