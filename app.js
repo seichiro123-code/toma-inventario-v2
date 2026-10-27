@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.3';
+  var CFG = window.CONFIG, VERSION = 'F4.3.1';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -553,7 +553,7 @@
   // ---------- pantalla ----------
   function chipTxt() {
     var p = pendientes().length;
-    if (!S.online) return { t: 'Sin conexión' + (p ? ' · ' + p : ''), c: 'chip off' };
+    if (!S.online || !navigator.onLine) return { t: 'Sin conexión' + (p ? ' · ' + p : ''), c: 'chip off' };   // una respuesta tardía no debe tapar el aviso del navegador
     if (p) return { t: p + ' sin enviar', c: 'chip pen' };
     return { t: S.vista === 'contar' ? 'Guardado' : 'En línea', c: 'chip' };
   }
