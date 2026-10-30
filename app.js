@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.4';
+  var CFG = window.CONFIG, VERSION = 'F4.5';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -29,7 +29,7 @@
   function esActivo(v) { return v === true || String(v).toLowerCase() === 'true'; }
 
   // ---------- comunicación con el servicio ----------
-  var LECTURAS = { datosAjuste: 1, avance: 1, cambiosUnidad: 1, articulos: 1, posicionesUnidad: 1, yo: 1, listarUnidades: 1, listarUsuarios: 1, historial: 1, validarDatos: 1, listarTomas: 1, excelToma: 1 };
+  var LECTURAS = { datosAjuste: 1, avance: 1, cambiosUnidad: 1, articulos: 1, posicionesUnidad: 1, yo: 1, listarUnidades: 1, listarUsuarios: 1, historial: 1, validarDatos: 1, listarTomas: 1, excelToma: 1, paqueteToma: 1 };
   var ESPERAS = [2000, 4000, 8000];            // pausas entre reintentos de lecturas (servidor dormido o celular sin red aún)
   function espera(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function pintarEstado() { var e = document.getElementById('estado'); if (e) e.className = S.lentos > 0 ? 'on' : ''; }
@@ -350,30 +350,90 @@
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 15 } };
     return wb.xlsx.writeBuffer();
   }
-  // Excel final del administrador: todas las posiciones de la toma, con lo contado, las diferencias y lo anotado. Es el registro de la toma.
-  function armarExcelToma(toma, res, filas) {
+  // Paquete de análisis de una toma: un Excel con varias hojas, para guardarlo y analizarlo (trazabilidad, tiempos, incidencias).
+  //   Resumen · Toma (una fila por posición) · Versiones (cada vez que alguien guardó una cantidad) · Unidades (quién y cuánto tardó) · Eventos · Anotaciones · Por artículo (falta o sobra por código)
+  var FMT_HORA = 'dd/mm/yyyy hh:mm:ss';
+  function horaExcel(s) {     // "2026-10-28 09:00:00" (hora de Lima) -> fecha de Excel que muestra esa misma hora
+    var m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(s || '');
+    return m ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6])) : null;
+  }
+  function hojaDe(wb, nombre, cols, filas, arreglo) {
+    var ws = wb.addWorksheet(nombre, { views: [{ state: 'frozen', ySplit: 1 }] });
+    encabezado(ws, cols);
+    filas.forEach(function (f) { var row = ws.addRow(arreglo(f)); row.eachCell(function (c) { if (c.value instanceof Date) c.numFmt = FMT_HORA; }); });
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+    return ws;
+  }
+  // Falta o sobra por código en TODA la toma (suma de todas sus ubicaciones). Solo cuenta las posiciones contadas; el reconteo se muestra aparte, no se impone cuál vale.
+  function porArticulo(filas) {
+    var g = {}, lista = [];
+    filas.forEach(function (f) {
+      var cod = aCod(f); if (!cod) return;
+      var a = g[cod]; if (!a) { a = g[cod] = { cod: cod, desc: '', ubic: 0, sis: 0, con: 0, falt: 0, sobr: 0, nfalt: 0, nsobr: 0, sin: 0, rec: 0 }; lista.push(a); }
+      if (!a.desc && f.descripcion) a.desc = f.descripcion;
+      a.ubic++; if (f.n_reconteos) a.rec++;
+      if (f.contado === null || f.contado === undefined) { a.sin++; return; }
+      var d = f.contado - f.sistema; a.sis += f.sistema; a.con += f.contado;
+      if (d < 0) { a.falt -= d; a.nfalt++; } else if (d > 0) { a.sobr += d; a.nsobr++; }
+    });
+    lista.forEach(function (a) {
+      a.neto = a.con - a.sis;
+      a.res = a.sin === a.ubic ? 'Sin contar' : a.neto < 0 ? 'Falta' : a.neto > 0 ? 'Sobra' : (a.nfalt || a.nsobr) ? 'Cuadra (se compensa entre ubicaciones)' : 'Cuadra';
+    });
+    lista.sort(function (x, y) { return x.neto - y.neto || ordenNat(x.cod, y.cod); });       // lo que más falta, primero
+    return lista;
+  }
+  function armarPaquete(toma, res, filas, d) {
     var wb = new window.ExcelJS.Workbook(), rs = wb.addWorksheet('Resumen'), hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 16).split('T');
     rs.columns = [{ width: 38 }, { width: 24 }];
     function par(a, b, neg) { var r = rs.addRow([a, b]); if (neg) r.getCell(1).font = { bold: true }; }
-    par('Toma', toma.nombre, true); par('Estado', toma.estado === 'abierta' ? 'Abierta' : 'Cerrada'); par('Abierta por', toma.abierta_por || ''); par('Abierta el', toma.abierta_en || ''); par('Cerrada el', toma.cerrada_en || '—');
-    par('Excel bajado el', fmtVcto(hoy[0]) + ' ' + hoy[1]); rs.addRow([]);
+    par('Toma', toma.nombre, true); par('ID de la toma', toma.id); par('Estado', toma.estado === 'abierta' ? 'Abierta' : 'Cerrada'); par('Abierta por', toma.abierta_por || ''); par('Abierta el', toma.abierta_en || ''); par('Cerrada el', toma.cerrada_en || '—');
+    par('Paquete bajado el', fmtVcto(hoy[0]) + ' ' + hoy[1]); rs.addRow([]);
     par('Posiciones', res.total, true); par('Contadas', res.contadas); par('Sin contar', res.sin_contar); par('Contadas como vacías', res.vacias);
     par('Con menos que el sistema (rojo)', res.menos); par('Con más que el sistema (azul)', res.mas); par('Con lote o vencimiento distinto', res.lote_vcto); par('Reconteos pedidos', res.reconteos);
     par('Unidades', Object.keys(res.unidades).map(function (k) { return k + ': ' + res.unidades[k]; }).join(' · ')); rs.addRow([]);
-    par('Última persona que contó cada posición', 'Posiciones', true); res.contadores.forEach(function (c) { par(c.usuario, c.posiciones); });
+    par('Última persona que contó cada posición', 'Posiciones', true); res.contadores.forEach(function (c) { par(c.usuario, c.posiciones); }); rs.addRow([]);
+    par('Cómo leer este archivo', '', true);
+    par('Toma', 'Una fila por posición. Diferencia = contado − sistema (rojo: menos · azul: más). El reconteo se muestra aparte.');
+    par('Versiones', 'Cada vez que alguien guardó una cantidad, con la anterior, la hora del celular y la del servidor. Para trazabilidad y tiempos.');
+    par('Unidades', 'Cada pasillo, torre o reconteo: quién lo contó, cuándo lo tomó y cuándo lo cerró (minutos).');
+    par('Eventos y Anotaciones', 'Lo que pasó en la toma (liberaciones con su motivo, reconteos) y todo lo que anotó el ajustador.');
+    par('Por artículo', 'Falta o sobra por código sumando todas sus ubicaciones. Guarda el paquete de cada toma: un código que falta o sobra toma tras toma es lo que hay que investigar.');
+    par('Clave de ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.');
+    par('Tiempos', 'Al calcular velocidad ignora pausas de más de 10 minutos entre dos guardados (almuerzo, descanso).');
+    par('Confidencial', 'Contiene datos del almacén y de las personas que contaron. Úsalo para mejorar el proceso, no como prueba por sí solo.');
+
     var ws = wb.addWorksheet('Toma', { views: [{ state: 'frozen', ySplit: 1 }] });
     encabezado(ws, [['Nave', 8], ['Pasillo / Torre', 14], ['UDC', 10], ['Celda', 9], ['POS', 7], ['Código', 12], ['Descripción', 34], ['Lote', 13], ['Vcto', 12], ['Stock sistema', 13], ['Contado', 11], ['Diferencia', 12],
-      ['Reconteo', 11], ['Dif. reconteo', 13], ['Lote real', 13], ['Vcto real', 12], ['Situación', 12], ['Contó', 12], ['Hora', 17], ['Reconteo por', 13], ['Estado ajuste', 14], ['Obs ajustador', 30], ['Ajustó', 12], ['Obs contador', 30], ['CLAVE', 22]]);
+      ['Reconteo', 11], ['Dif. reconteo', 13], ['Lote real', 13], ['Vcto real', 12], ['Situación', 12], ['Contó', 12], ['Hora', 17], ['Reconteo por', 13], ['Estado ajuste', 14], ['Obs ajustador', 30], ['Ajustó', 12], ['Obs contador', 30],
+      ['Clave ubicación', 26], ['ID toma', 18], ['CLAVE', 22]]);
     filas.forEach(function (f) {
       var torre = f.torre !== null && f.torre !== undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
       var row = ws.addRow([torre ? 'Modula' : f.nave, torre ? 'Torre ' + f.torre : f.pasillo, String(f.udc), f.celda, f.pos, aCod(f), f.descripcion || '', aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema,
         f.contado, f.contado === null ? '' : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? '' : f.reconteo - f.sistema, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '',
-        f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.obs_contador || '', f.id]);
+        f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.obs_contador || '', f.clave || '', toma.id, f.id]);
       cantidad(row.getCell(11), f.contado, f.sistema); if (!sinRec) cantidad(row.getCell(13), f.reconteo, f.sistema);
       if (f.lote_real) pinta(row.getCell(15), 'FFFAEEDA', 'FF633806'); if (f.vcto_real) pinta(row.getCell(16), 'FFFAEEDA', 'FF633806');
     });
-    ws.getColumn(25).hidden = true;                       // CLAVE: identifica la posición (útil para otro sistema); no estorba a la vista
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 25 } };
+    ws.getColumn(27).hidden = true;                       // CLAVE: identifica la posición dentro de la toma (útil para otro sistema); no estorba a la vista
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 27 } };
+
+    hojaDe(wb, 'Versiones', [['ID toma', 18], ['Clave ubicación', 26], ['Unidad', 22], ['UDC', 10], ['POS', 7], ['Código', 12], ['Contador', 13], ['Cantidad', 10], ['Cantidad anterior', 11], ['N.º versión', 9], ['Vacía', 8],
+      ['Hora (celular)', 20], ['Hora (servidor)', 20], ['Segundos desde su guardado anterior', 16], ['Lote real', 13], ['Vcto real', 12], ['Obs', 28], ['Es reconteo', 10], ['N.º pedido', 9]], d.versiones, function (v) {
+        return [toma.id, v.clave || '', v.unidad || '', v.udc ? String(v.udc) : '', v.pos || '', v.codigo || '', v.usuario, v.cantidad, v.antes === null || v.antes === undefined ? null : v.antes, v.version, v.vacia ? 'Sí' : 'No',
+          horaExcel(v.hora), horaExcel(v.hora_srv), v.seg === null || v.seg === undefined ? null : v.seg, v.lote_real || '', v.vcto_real ? fmtVcto(v.vcto_real) : '', v.obs || '', v.reconteo ? 'Sí' : 'No', v.pedido_n === null || v.pedido_n === undefined ? null : v.pedido_n]; });
+    hojaDe(wb, 'Unidades', [['ID toma', 18], ['Unidad', 24], ['Tipo', 9], ['Zona', 12], ['Nave', 7], ['Pasillo / Torre', 14], ['Estado', 12], ['Contador', 13], ['Tomada', 20], ['Cerrada por', 13], ['Cerrada', 20], ['Minutos', 9],
+      ['Posiciones', 10], ['Contadas', 10], ['Versiones', 10], ['Reconteo de', 14], ['N.º pedido', 9], ['Pedido por', 13], ['Pedido el', 20], ['Último movimiento', 20]], d.unidades, function (u) {
+        var torre = u.torre !== null && u.torre !== undefined;
+        return [toma.id, u.nombre, u.tipo, u.zona || '', torre ? '' : u.nave, torre ? 'Torre ' + u.torre : u.pasillo, u.estado, u.operador || '', horaExcel(u.tomado_en), u.cerrado_por || '', horaExcel(u.cerrado_en),
+          u.minutos === null || u.minutos === undefined ? null : u.minutos, u.posiciones, u.contadas, u.versiones, u.reconteo_de || '', u.pedido_n === null || u.pedido_n === undefined ? null : u.pedido_n, u.pedido_por || '', horaExcel(u.pedido_en), horaExcel(u.ultimo_movimiento)]; });
+    hojaDe(wb, 'Eventos', [['ID toma', 18], ['Hora', 20], ['Usuario', 14], ['Acción', 24], ['Detalle', 70]], d.eventos, function (e) { return [toma.id, horaExcel(e.ts), e.usuario || '', e.accion, e.detalle || '']; });
+    hojaDe(wb, 'Anotaciones', [['ID toma', 18], ['Hora', 20], ['Ajustador', 13], ['Clave ubicación', 26], ['Unidad', 22], ['UDC', 10], ['POS', 7], ['Código', 12], ['Estado', 14], ['Obs', 40]], d.anotaciones, function (a) {
+      return [toma.id, horaExcel(a.ts), a.ajustador, a.clave || '', a.unidad || '', a.udc ? String(a.udc) : '', a.pos || '', a.codigo || '', a.estado || '', a.obs || '']; });
+    var pa = hojaDe(wb, 'Por artículo', [['ID toma', 18], ['Código', 12], ['Descripción', 36], ['Ubicaciones', 11], ['Stock sistema (contadas)', 14], ['Contado', 11], ['Diferencia neta', 12], ['Falta (u)', 10], ['Sobra (u)', 10],
+      ['Ubic. con falta', 10], ['Ubic. con sobra', 10], ['Ubic. sin contar', 10], ['Ubic. con reconteo', 10], ['Resultado', 34]], porArticulo(filas), function (a) {
+        return [toma.id, a.cod, a.desc, a.ubic, a.sis, a.con, a.neto, a.falt, a.sobr, a.nfalt, a.nsobr, a.sin, a.rec, a.res]; });
+    pa.eachRow(function (row, n) { if (n > 1) { var r = row.getCell(14).value; if (r === 'Falta') pinta(row.getCell(14), 'FFF7C1C1', 'FF791F1F'); else if (r === 'Sobra') pinta(row.getCell(14), 'FFB5D4F4', 'FF0C447C'); } });
     return wb.xlsx.writeBuffer();
   }
   function descargarArchivo(buf, nombre) {
@@ -447,16 +507,22 @@
       else h += '<button class="btn rel ancho" data-a="pedirAbrir"' + (inf.ok ? '' : ' disabled') + '>Abrir toma</button>';
     }
     if (abierta) h += '<div class="sec" style="padding:14px 0 6px">Terminar todo el inventario</div><p class="pie" style="padding:0 0 8px">Cierra la toma cuando ya no se vaya a contar más. Los datos quedan guardados hasta que se archive la toma.</p><button class="btn pel ancho" data-a="pedirCerrarToma">Cerrar toma</button>';
-    return h + excelTomas() + '</div>';
+    return h + paquetesToma() + '</div>';
   }
-  // Lista de tomas con su Excel final (se puede bajar en cualquier momento, aunque la toma siga abierta)
-  function excelTomas() {
+  // Lista de tomas con su paquete de análisis (se puede bajar en cualquier momento, aunque la toma siga abierta).
+  // Una toma cerrada con el paquete al día se puede archivar: se borra de la nube y queda lo que bajaste.
+  function paquetesToma() {
     var t = S.tomas; if (!t || !t.length) return '';
-    return '<div class="sec" style="padding:14px 0 6px">Excel de la toma</div><p class="pie" style="padding:0 0 8px">Baja todo lo contado, con las diferencias, cuando quieras. Guárdalo: es el registro de la toma.</p><ul class="lista" style="margin:0 -14px">' +
+    return '<div class="sec" style="padding:14px 0 6px">Paquete de análisis</div><p class="pie" style="padding:0 0 8px">Baja todo lo contado, con su historial, las diferencias y los tiempos. Guárdalo: es el registro de la toma. Cuando la toma esté cerrada y el paquete bajado, podrás archivarla (se borra de la nube).</p><ul class="lista" style="margin:0 -14px">' +
       t.slice(0, 5).map(function (x) {
-        return '<li class="fila"><div class="info"><div class="nom">' + esc(x.nombre) + '</div><div class="det">' + (x.estado === 'abierta' ? 'Abierta' : 'Cerrada') + ' · ' + esc(fecha(x.abierta_en)) + ' · ' + esc(x.filas) + ' posiciones</div></div>' +
-          '<div class="acc"><button class="btn peq rel" data-a="excelToma" data-id="' + esc(x.id) + '">Descargar Excel</button></div></li>'; }).join('') + '</ul>';
+        var arch = !!x.archivada_en, cerr = x.estado === 'cerrada', pq = x.paquete, det;
+        if (arch) det = 'Archivada el ' + fecha(x.archivada_en) + ' · ' + x.filas + ' posiciones';
+        else det = (cerr ? 'Cerrada' : 'Abierta') + ' · ' + fecha(x.abierta_en) + ' · ' + x.filas + ' posiciones' + (cerr ? (pq ? (pq.al_dia ? ' · paquete bajado ' + hace(pq.bajado_en) : ' · cambió después de bajar el paquete') : ' · paquete sin bajar') : '');
+        return '<li class="fila"><div class="info"><div class="nom">' + esc(x.nombre) + '</div><div class="det">' + esc(det) + '</div></div><div class="acc">' +
+          (arch ? '' : '<button class="btn peq rel" data-a="paquete" data-id="' + esc(x.id) + '">Descargar paquete</button>' +
+            (cerr ? '<button class="btn peq pel" data-a="pedirArchivar" data-id="' + esc(x.id) + '"' + (pq && pq.al_dia ? '' : ' disabled') + '>Archivar</button>' : '')) + '</div></li>'; }).join('') + '</ul>';
   }
+  function recargarTomas() { return api('listarTomas').then(function (r) { if (r.ok) { S.tomas = r.tomas; renderConScroll(); } }); }
   function adminUsuarios() {
     if (!S.usuarios) return cargando();
     return '<div style="padding:12px 14px"><button class="btn rel ancho" data-a="nuevoUsuario">Nuevo usuario</button></div>' + '<ul class="lista">' + S.usuarios.map(function (u) {
@@ -1000,19 +1066,47 @@
         descargarArchivo(buf, 'Ajustes_' + (u.tipo === 'torre' ? 'Torre' + u.torre : 'Pasillo' + u.pasillo + '_Nave' + u.nave) + '_' + hoy + '.xlsx'); liberarBoton(b);
       }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el Excel.'); });
     },
-    excelToma: function (b) {
-      var id = b.dataset.id, filas = [], toma = null, res = null; ocupar(b, 'Preparando…');
-      function pagina(desde) {                         // el servidor entrega la toma por trozos de hasta 2.000 posiciones
-        return api('excelToma', { id: id, desde: desde, limite: 2000 }).then(function (r) {
-          if (!r.ok) throw new Error(r.mensaje || 'No se pudo preparar el Excel.');
-          toma = r.toma; if (r.resumen) res = r.resumen; filas = filas.concat(r.filas);
-          if (r.siguiente !== null && r.siguiente !== undefined) { b.textContent = 'Preparando… ' + filas.length + ' de ' + r.total; return pagina(r.siguiente); }
-        });
+    paquete: function (b) {
+      var id = b.dataset.id, hechas = 0, TOTAL = 5; ocupar(b, 'Preparando…');
+      function traer(accion, extra) {                 // el servidor entrega cada hoja por trozos de hasta 2.000 filas; aquí se juntan
+        var filas = [], primero = null;
+        function pagina(desde) {
+          var cuerpo = { id: id, desde: desde, limite: 2000 }; for (var k in extra) cuerpo[k] = extra[k];
+          return api(accion, cuerpo).then(function (r) {
+            if (!r.ok) throw new Error(r.mensaje || 'No se pudo preparar el paquete.');
+            if (!primero) primero = r; filas = filas.concat(r.filas);
+            if (r.siguiente !== null && r.siguiente !== undefined) return pagina(r.siguiente);
+            hechas++; b.textContent = 'Preparando… ' + hechas + ' de ' + TOTAL; return { primero: primero, filas: filas };
+          });
+        }
+        return pagina(0);
       }
-      Promise.all([cargarExcelJS(), pagina(0)]).then(function () { return armarExcelToma(toma, res, filas); }).then(function (buf) {
-        var hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10), nom = String(toma.nombre).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'toma';
-        descargarArchivo(buf, 'Toma_' + nom + '_' + hoy + '.xlsx'); liberarBoton(b); toast('Excel listo (' + filas.length + ' posiciones).');
-      }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el Excel.'); });
+      Promise.all([cargarExcelJS(), traer('excelToma', {}), traer('paqueteToma', { hoja: 'versiones' }), traer('paqueteToma', { hoja: 'unidades' }), traer('paqueteToma', { hoja: 'eventos' }), traer('paqueteToma', { hoja: 'anotaciones' })]).then(function (v) {
+        var pos = v[1], toma = pos.primero.toma, cont = { posiciones: pos.filas.length, versiones: v[2].filas.length, unidades: v[3].filas.length, eventos: v[4].filas.length, anotaciones: v[5].filas.length };
+        return armarPaquete(toma, pos.primero.resumen, pos.filas, { versiones: v[2].filas, unidades: v[3].filas, eventos: v[4].filas, anotaciones: v[5].filas }).then(function (buf) {
+          var hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10), nom = String(toma.nombre).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'toma';
+          descargarArchivo(buf, 'Paquete_' + nom + '_' + hoy + '.xlsx'); liberarBoton(b);
+          if (toma.estado !== 'cerrada') return toast('Paquete listo (' + cont.posiciones + ' posiciones). La toma sigue abierta: es una foto de este momento.');
+          // toma cerrada: el servidor coteja lo recibido; si coincide, queda anotado y se podrá archivar
+          return api('registrarPaquete', { id: id, conteos: cont }).then(function (r) {
+            toast(r.ok ? 'Paquete listo y registrado. Ábrelo y revísalo antes de archivar la toma.' : (r.mensaje || 'El paquete se bajó, pero no se pudo registrar.')); return recargarTomas();
+          });
+        });
+      }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el paquete.'); });
+    },
+    pedirArchivar: function (b) {
+      var t = (S.tomas || []).filter(function (x) { return x.id === b.dataset.id; })[0]; if (!t) return;
+      confirmar('Archivar «' + t.nombre + '»', 'Se borran de la nube las posiciones, los conteos, las unidades y las anotaciones de esta toma. Quedan su nombre, sus fechas, sus totales y su historial de eventos. No se puede deshacer: antes, abre el archivo que bajaste y comprueba que está completo.',
+        'Archivar', 'archivar', t.id, '<div class="campo"><label for="nomArch">Escribe el nombre de la toma para confirmar</label><input id="nomArch" autocomplete="off" autocapitalize="none" spellcheck="false"></div>');
+    },
+    archivar: function (b) {
+      var inp = $capa.querySelector('#nomArch'), nombre = inp ? inp.value : '';
+      if (!nombre.trim()) return mostrarError(null, 'Escribe el nombre de la toma.');
+      ocupar(b, 'Archivando…');
+      api('archivarToma', { id: b.dataset.id, nombre: nombre }).then(function (r) {
+        if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje || 'No se pudo archivar.'); }
+        cerrarModal(); toast('Toma archivada.'); return recargarTomas();
+      });
     },
     real: function (b) { abrirReal(b.dataset.id); },
     guardarReal: function (b) {
