@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.7';
+  var CFG = window.CONFIG, VERSION = 'F4.8';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -109,6 +109,7 @@
   function cabecera(titulo, sub, teal, atras) {
     var ini = S.ses ? esc(S.ses.usuario.charAt(0).toUpperCase()) : '';
     return '<header class="cab' + (teal ? ' teal' : '') + '">' +
+      (!atras ? '<svg class="cubo-m" aria-hidden="true"><use href="#cubo"/></svg>' : '') +
       (atras ? '<button class="batras" data-a="atras" aria-label="Volver atrás"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"/></svg><span>Atrás</span></button>' : '') +
       '<div class="t"><h1>' + esc(titulo) + '</h1><small>' + esc(sub || '') + '</small></div>' +
       (S.ses && S.vista === 'home' ? '<button class="ibtn" data-a="recargar" aria-label="Actualizar">↻</button>' : '') +
@@ -126,13 +127,13 @@
 
   // ---------- LOGIN y PIN ----------
   function vistaLogin() {
-    return '<main class="pantalla"><div class="marca"><img class="logo" src="icon-192.png" alt=""><h1>Toma de inventario</h1><p>Ingresa con tu usuario y PIN.</p></div>' +
+    return '<main class="pantalla portada"><div class="pc"><svg class="cubo" aria-hidden="true"><use href="#cubo"/></svg><h1>BenitoStock</h1><span class="bar"></span><p class="lema">Cuenta<i>·</i>Escanea<i>·</i>Confirma</p></div>' +
       '<form class="form" data-f="login" autocomplete="on" novalidate>' +
       (S.aviso ? '<div class="aviso" role="alert">' + esc(S.aviso) + '</div>' : '') +
       '<div class="campo"><label for="u">Usuario</label><input id="u" name="usuario" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></div>' +
       '<div class="campo"><label for="p">PIN</label><input id="p" class="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="10" required></div>' +
       '<div id="msg"></div><button class="btn rel ancho" type="submit">Entrar</button>' +
-      '<p class="pie">¿No tienes usuario o olvidaste tu PIN? Pídelo al administrador.</p></form></main>';
+      '<p class="pie">¿No tienes usuario o olvidaste tu PIN? Pídelo al administrador.</p></form><footer class="firma"><svg aria-hidden="true"><use href="#cubo"/></svg></footer></main>';
   }
   function vistaPin() {
     var forzado = S.ses.debe;

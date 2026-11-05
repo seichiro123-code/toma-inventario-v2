@@ -1,13 +1,13 @@
 {
-  "name": "Toma de inventario",
-  "short_name": "Inventario",
+  "name": "BenitoStock",
+  "short_name": "BenitoStock",
   "description": "Conteo físico de inventario por pasillo y torre (versión servidor)",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0C131B",
-  "theme_color": "#0C131B",
+  "background_color": "#14161B",
+  "theme_color": "#14161B",
   "lang": "es",
   "icons": [
     {
