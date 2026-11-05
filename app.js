@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.5';
+  var CFG = window.CONFIG, VERSION = 'F4.6';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -177,10 +177,19 @@
       var hechas = S.av && S.av.contadas ? (S.av.contadas[u.id] || 0) : null, id = esc(u.id);
       if (hechas !== null && (u.estado === 'En conteo' || u.estado === 'Cerrado')) sub += ' · ' + hechas + ' de ' + u.filas;
       if (u.estado === 'En conteo') acc = '<div class="acc"><button class="btn peq" data-a="pedirCerrarAdm" data-id="' + id + '">Cerrar</button><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button><button class="btn pel peq" data-a="pedirLiberar" data-id="' + id + '">Liberar</button></div>';
-      else if (u.estado === 'Cerrado') acc = '<div class="acc"><span class="est ok">Cerrado</span><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button><button class="btn peq" data-a="pedirReabrir" data-id="' + id + '">Reabrir</button></div>';
+      else if (u.estado === 'Cerrado') {
+        if (u.ajustador) sub += ' · ' + (u.ajuste_estado === 'ajustado' ? 'Ajustado por ' : 'Ajusta ') + esc(u.ajustador);
+        acc = '<div class="acc"><span class="est ok">Cerrado</span><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button>' +
+          (u.ajustador ? '<button class="btn pel peq" data-a="pedirLiberarAjuste" data-id="' + id + '">Liberar ajuste</button>' : '<button class="btn peq" data-a="pedirReabrir" data-id="' + id + '">Reabrir</button>') + '</div>';
+      }
       else acc = '<span class="est' + (u.estado === 'Pendiente' ? '' : ' ok') + '">' + esc(u.estado) + '</span>';
     } else if (modo === 'ajuste') {
-      acc = u.estado === 'Pendiente' ? '<span class="est">Pendiente</span>' : '<button class="btn rel" data-a="abrirAjuste" data-id="' + esc(u.id) + '">Abrir</button>';
+      var yo = S.ses.usuario, ae = u.ajuste_estado, uid = esc(u.id), ver = '<button class="btn gr peq" data-a="abrirAjuste" data-id="' + uid + '">Ver</button>';
+      if (u.estado === 'Pendiente') acc = '<span class="est">Pendiente</span>';
+      else if (u.estado !== 'Cerrado') acc = ver;                                  // todavía se cuenta: solo mirar
+      else if (ae === 'en_ajuste' && u.ajustador === yo) acc = '<button class="btn rel" data-a="abrirAjuste" data-id="' + uid + '">Continuar</button>';
+      else if (ae === 'sin_tomar') acc = '<div class="acc">' + ver + '<button class="btn peq" data-a="tomarAjuste" data-id="' + uid + '"' + (bloqueado ? ' disabled' : '') + '>Tomar</button></div>';
+      else acc = '<div class="acc"><span class="est' + (ae === 'ajustado' ? ' ok' : '') + '">' + (ae === 'ajustado' ? 'Ajustado' : 'Ajusta') + ' · ' + esc(u.ajustador) + '</span>' + ver + '</div>';
     } else { acc = '<span class="est' + (u.estado === 'Pendiente' ? '' : ' ok') + '">' + esc(u.estado) + '</span>'; }
     return '<li class="' + cls + '"><div class="letra' + (torre ? ' torre' : '') + '" aria-hidden="true">' + esc(rotulo) + '</div>' +
       '<div class="info"><div class="nom">' + esc((u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (torre ? ('Torre ' + u.torre) : ('Pasillo ' + u.pasillo) + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : ''))) + '</div><div class="det">' + sub + (u.estado === 'En conteo' ? ' · ' + esc(hace(u.ultimo_movimiento)) : '') + '</div></div>' + acc + '</li>';
@@ -206,9 +215,12 @@
     lista.forEach(function (u) { if (u.zona && u.tipo !== 'torre' && zonas.indexOf(u.zona) < 0) zonas.push(u.zona); });
     if (zonas.length > 1) { if (!S.zona || zonas.indexOf(S.zona) < 0) S.zona = zonas[0]; lista = lista.filter(function (u) { return u.zona === S.zona; }); }
     var miUnidad = un.filter(function (u) { return u.mia; })[0], bloqueado = modo === 'contador' && !!miUnidad;
+    var miAjuste = modo === 'ajuste' ? un.filter(function (u) { return u.ajustador === S.ses.usuario && u.ajuste_estado === 'en_ajuste'; })[0] : null;
+    if (miAjuste) bloqueado = true;
     return '<nav class="tabs" role="tablist">' + tabs.map(function (t) { return '<button class="tab" role="tab" aria-selected="' + (t.id === S.tab) + '" data-a="tab" data-id="' + t.id + '">' + esc(t.nombre) + '</button>'; }).join('') + '</nav>' +
       (zonas.length > 1 ? '<div class="seg" role="group">' + zonas.map(function (z) { return '<button aria-pressed="' + (z === S.zona) + '" data-a="zona" data-id="' + z + '">' + z.charAt(0) + z.slice(1).toLowerCase() + '</button>'; }).join('') + '</div>' : '') +
-      (bloqueado ? '<div class="aviso" style="margin:12px 14px 0">Tienes en conteo <b>' + esc(miUnidad.nombre) + '</b>. Termínala antes de tomar otra.</div>' : '') +
+      (modo === 'contador' && bloqueado ? '<div class="aviso" style="margin:12px 14px 0">Tienes en conteo <b>' + esc(miUnidad.nombre) + '</b>. Termínala antes de tomar otra.</div>' : '') +
+      (miAjuste ? '<div class="aviso" style="margin:12px 14px 0">Estás ajustando <b>' + esc(miAjuste.nombre) + '</b>. Termina de ajustar ese pasillo antes de tomar otro.</div>' : '') +
       '<ul class="lista">' + lista.map(function (u) { return filaUnidad(u, modo, bloqueado); }).join('') + '</ul>' +
       (modo === 'contador' ? '<p class="pie">Un pasillo tomado queda bloqueado para los demás.</p>' : '');
   }
@@ -221,7 +233,7 @@
   function vistaAjustador() {
     var d = S.datos, cuerpo;
     if (!d) cuerpo = cargando(); else if (!d.toma_activa) cuerpo = vacioToma();
-    else cuerpo = listaPorTabs('ajuste') + '<p class="pie">Abre un pasillo ya contado para ver las diferencias, pedir reconteos y descargar el Excel.</p>';
+    else cuerpo = listaPorTabs('ajuste') + '<p class="pie">Toma un pasillo ya contado para ajustarlo: queda a tu nombre y nadie más puede anotar en él. Con «Ver» solo miras.</p>';
     return '<main class="pantalla">' + cabecera('Ajustes', S.ses.usuario + ' · ajustador') + '<div class="cuerpo">' + cuerpo + '</div></main>';
   }
   var AJ = { id: '', datos: null, sel: {}, filtro: 'todas', cur: null, err: '', verCompletos: false };
@@ -229,19 +241,26 @@
   function aClase(v, s) { return v === null || v === undefined ? '' : (v < s ? ' menos' : (v > s ? ' mas' : '')); }    // rojo: contado menor · azul: mayor · sin color: igual
   function aRecon(f) { var r = f.reconteos.filter(function (x) { return x.cantidad !== null && x.cantidad !== undefined; }); return r.length ? r[r.length - 1] : null; }
   function aEnRecon(f) { return f.reconteos.some(function (x) { return x.estado === 'Pendiente' || x.estado === 'En conteo'; }); }
+  function aVig(f) { if (f.vigente !== undefined) return f.vigente; var r = aRecon(f); return r ? r.cantidad : f.contado; }          // valor que vale: último reconteo cerrado o, si no hay, el primer conteo
+  function aConforme(f) { var v = aVig(f); return v !== null && v !== undefined && v === f.sistema; }                              // cuadra con el sistema: no hay nada que ajustar
+  function aDif(f) { var v = aVig(f); return v !== null && v !== undefined && v !== f.sistema; }
+  function aMarca(f) { return f.estado && f.estado !== 'Conforme' ? f.estado : ''; }                                             // un «Conforme» viejo (la cantidad cambió después) no vale
+  function aEstado(f) { return aMarca(f) || (aConforme(f) ? 'Conforme' : ''); }
+  function aFaltan(d) { return d.filas.filter(function (f) { return aMuestra(f) && aDif(f) && !aMarca(f); }).length; }
+  function aEditable(d) { var u = d.unidad; return u.estado === 'Cerrado' && u.ajustador === S.ses.usuario && !u.ajuste_terminado_en; }
   function aCod(f) { return f.codigo || f.codigo_reg || ''; }
   function aLote(f) { return f.codigo ? f.lote : (f.lote_reg || ''); }
   function aVcto(f) { return f.codigo ? f.vcto : f.vcto_reg; }
   function aMuestra(f) { return !!f.codigo || !!f.codigo_reg || (f.contado !== null && f.contado > 0); }   // las posiciones vacías sin nada no se muestran
   function aFiltra(f) {
     if (!aMuestra(f)) return false;
-    if (AJ.filtro === 'dif') return f.contado !== null && f.contado !== f.sistema;
+    if (AJ.filtro === 'dif') return aDif(f);
     if (AJ.filtro === 'lote') return !!(f.lote_real || f.vcto_real);
-    if (AJ.filtro === 'sin') return f.contado !== null && f.contado !== f.sistema && !f.estado;   // pendientes de marcar = con diferencia y sin Estado (igual que el resumen)
+    if (AJ.filtro === 'sin') return aDif(f) && !aMarca(f);   // pendientes de marcar = con diferencia vigente y sin Estado (lo que impide terminar)
     return true;
   }
-  function aFila(f) {
-    var r = aRecon(f), puede = f.contado !== null && !aEnRecon(f), cod = aCod(f);
+  function aFila(f, ed) {
+    var r = aRecon(f), puede = ed && f.contado !== null && !aEnRecon(f), cod = aCod(f), conf = aConforme(f);
     return '<tr data-fila="' + esc(f.id) + '"' + (AJ.cur === f.id ? ' class="sel"' : '') + '>' +
       '<td class="ck"><input type="checkbox" data-k="' + esc(f.id) + '"' + (AJ.sel[f.id] ? ' checked' : '') + (puede ? '' : ' disabled') + ' aria-label="Recontar ' + esc(cod) + '"></td>' +
       '<td class="mono">' + esc(cod) + (!f.codigo && cod ? ' <span class="pill am">nuevo</span>' : '') + '</td>' +
@@ -250,8 +269,8 @@
       '<td class="n">' + aCant(f.sistema) + '</td><td class="n' + aClase(f.contado, f.sistema) + '">' + aCant(f.contado) + '</td>' +
       '<td class="n' + (r ? aClase(r.cantidad, f.sistema) : '') + '">' + (r ? r.cantidad : (aEnRecon(f) ? '<span class="pill am">en reconteo</span>' : '')) + '</td>' +
       '<td class="' + (f.lote_real ? 'real' : '') + '">' + esc(f.lote_real || '') + '</td><td class="' + (f.vcto_real ? 'real' : '') + '">' + esc(f.vcto_real ? fmtVcto(f.vcto_real) : '') + '</td>' +
-      '<td class="an"><select data-e="' + esc(f.id) + '" aria-label="Estado"><option value="">—</option><option' + (f.estado === 'Ajustado' ? ' selected' : '') + '>Ajustado</option><option' + (f.estado === 'No ajustado' ? ' selected' : '') + '>No ajustado</option></select></td>' +
-      '<td class="an"><input type="text" data-o="' + esc(f.id) + '" maxlength="200" value="' + esc(f.obs || '') + '" aria-label="Observación"></td></tr>';
+      '<td class="an">' + (conf ? '<span class="pill ok">Conforme</span>' : ed ? '<select data-e="' + esc(f.id) + '" aria-label="Estado"><option value="">—</option><option' + (aMarca(f) === 'Ajustado' ? ' selected' : '') + '>Ajustado</option><option' + (aMarca(f) === 'No ajustado' ? ' selected' : '') + '>No ajustado</option></select>' : esc(aMarca(f))) + '</td>' +
+      '<td class="an">' + (ed ? '<input type="text" data-o="' + esc(f.id) + '" maxlength="200" value="' + esc(f.obs || '') + '" aria-label="Observación">' : esc(f.obs || '')) + '</td></tr>';
   }
   function aLectura(f) {
     var r = aRecon(f), x = '';
@@ -273,26 +292,30 @@
     return '<b>' + esc(aCod(f)) + ' · ' + esc(f.descripcion || '') + '</b><div class="ajg"><div><small>Sistema</small><b>' + aCant(f.sistema) + '</b></div><div><small>1.er conteo' + (f.contado_por ? ' · ' + esc(f.contado_por) : '') + '</small><b>' + (f.contado === null ? '—' : f.contado) + '</b></div>' + rs + '</div><div class="lect">' + esc(aLectura(f)) + '</div>';
   }
   function ajRecuento(d) {
-    var n = Object.keys(AJ.sel).filter(function (k) { return AJ.sel[k]; }).length;
+    var ed = aEditable(d), n = Object.keys(AJ.sel).filter(function (k) { return AJ.sel[k]; }).length;
     // Solo se muestran los pedidos que faltan (pendientes o en conteo); los completos se esconden y se ven con el interruptor.
     var completos = d.pedidos.filter(function (p) { return p.estado === 'Cerrado'; }).length;
     var pe = d.pedidos.filter(function (p) { return AJ.verCompletos || p.estado !== 'Cerrado'; }).map(function (p) { return '<div class="ped">RC-' + p.n + ' · ' + p.posiciones + ' posición(es) · <b>' + (p.estado === 'Cerrado' ? 'Completo' : esc(p.estado)) + '</b>' + (p.contador ? ' · ' + esc(p.contador) : '') + '</div>'; }).join('');
-    return '<div>' + (n ? n + ' posición(es) marcada(s) con la casilla Recontar.' : 'Marca con la casilla las posiciones que no te dan seguridad.') + '</div>' +
-      '<button class="btn rel" data-a="enviarReconteo"' + (n ? '' : ' disabled') + '>' + (n ? 'Enviar ' + n + ' a reconteo' : 'Enviar a reconteo') + '</button>' +
+    return '<div>' + (!ed ? 'Solo lectura: este pasillo no está a tu nombre.' : n ? n + ' posición(es) marcada(s) con la casilla Recontar.' : 'Marca con la casilla las posiciones que no te dan seguridad.') + '</div>' +
+      '<button class="btn rel" data-a="enviarReconteo"' + (n && ed ? '' : ' disabled') + '>' + (n ? 'Enviar ' + n + ' a reconteo' : 'Enviar a reconteo') + '</button>' +
       (d.pedidos.length ? '<div class="sec" style="padding:10px 0 4px">Pedidos enviados</div>' + (pe || '<div class="ped">No hay pedidos pendientes.</div>') +
         (completos ? '<label class="ped" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-vc' + (AJ.verCompletos ? ' checked' : '') + '> Ver también los completos (' + completos + ')</label>' : '') : '');
   }
   function ajusteCuerpo(d) {
-    var filas = d.filas.filter(aMuestra), vis = filas.filter(aFiltra);
-    var dif = filas.filter(function (f) { return f.contado !== null && f.contado !== f.sistema; });
-    var sin = dif.filter(function (f) { return !f.estado; }).length;
+    var filas = d.filas.filter(aMuestra), vis = filas.filter(aFiltra), u = d.unidad, ed = aEditable(d), yo = S.ses.usuario;
+    var dif = filas.filter(aDif), sin = aFaltan(d), conf = filas.filter(function (f) { return aConforme(f) && f.contado !== null; }).length;
+    var aviso = '';
+    if (u.estado === 'En conteo') aviso = 'Esta unidad todavía se está contando (' + esc(u.operador) + '). Los números pueden cambiar.';
+    else if (!u.ajustador) aviso = S.ses.rol === 'ajustador' ? 'Nadie ajusta este pasillo. Tómalo para anotar y pedir reconteos. <button class="btn peq" data-a="tomarAjusteAqui">Tomar este pasillo</button>' : 'Nadie ajusta este pasillo todavía.';
+    else if (u.ajuste_terminado_en) aviso = (u.ajustador === yo ? 'Terminaste' : esc(u.ajustador) + ' terminó') + ' de ajustar este pasillo. Solo lectura. Si hay que corregir algo, el administrador libera el ajuste.';
+    else if (u.ajustador !== yo) aviso = 'Este pasillo lo ajusta <b>' + esc(u.ajustador) + '</b>. Solo puedes mirarlo.';
     var chips = [['todas', 'Todas'], ['dif', 'Solo diferencias'], ['lote', 'Lote o vcto distinto'], ['sin', 'Sin marcar']].map(function (x) {
       return '<button data-a="ajfiltro" data-id="' + x[0] + '" aria-pressed="' + (AJ.filtro === x[0]) + '">' + x[1] + '</button>'; }).join('');
-    return (d.unidad.estado === 'En conteo' ? '<div class="aviso" style="margin:12px 14px 0">Esta unidad todavía se está contando (' + esc(d.unidad.operador) + '). Los números pueden cambiar.</div>' : '') +
-      '<div class="ajbar"><div class="seg" role="group">' + chips + '</div><button class="btn rel" data-a="excel">Descargar Excel</button><button class="ibtn" data-a="ajrecargar" aria-label="Actualizar">↻</button></div>' +
-      '<div class="pie" style="padding:0 14px 8px">' + filas.length + ' posiciones · ' + dif.length + ' con diferencia · ' + sin + ' sin marcar</div>' +
+    return (aviso ? '<div class="aviso" style="margin:12px 14px 0">' + aviso + '</div>' : '') +
+      '<div class="ajbar"><div class="seg" role="group">' + chips + '</div><button class="btn gr" data-a="excel">Descargar Excel</button>' + (ed ? '<button class="btn rel" data-a="pedirTerminarAjuste">Terminar de ajustar</button>' : '') + '<button class="ibtn" data-a="ajrecargar" aria-label="Actualizar">↻</button></div>' +
+      '<div class="pie" style="padding:0 14px 8px">' + filas.length + ' posiciones · ' + conf + ' conformes · ' + dif.length + ' con diferencia · <b>' + sin + ' sin marcar</b></div>' +
       '<div class="ajw"><table class="ajt"><thead><tr><th class="ck">Recontar</th><th>Código</th><th>Descripción</th><th>UDC</th><th>Celda</th><th>POS</th><th>Lote</th><th>Vcto</th><th class="n">Sistema</th><th class="n">Contado</th><th class="n">Reconteo</th><th>Lote real</th><th>Vcto real</th><th>Estado</th><th>Obs</th></tr></thead><tbody>' +
-      (vis.length ? vis.map(aFila).join('') : '<tr><td colspan="15" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>' +
+      (vis.length ? vis.map(function (f) { return aFila(f, ed); }).join('') : '<tr><td colspan="15" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>' +
       '<div class="ajpie"><section class="bx"><h3>Detalle de la fila elegida</h3><div id="ajdet">' + ajDetalle(d) + '</div></section><section class="bx"><h3>Reconteo</h3><div id="ajrec">' + ajRecuento(d) + '</div></section></div>';
   }
   function vistaAjuste() {
@@ -340,7 +363,7 @@
     encabezado(ws, cols);
     d.filas.filter(aMuestra).forEach(function (f) {
       var r = aRecon(f);
-      var row = ws.addRow([aCod(f), f.descripcion || '', String(f.udc), f.celda, f.pos, aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema, f.contado, r ? r.cantidad : null, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '', f.estado || '', f.obs || '', f.id]);
+      var row = ws.addRow([aCod(f), f.descripcion || '', String(f.udc), f.celda, f.pos, aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema, f.contado, r ? r.cantidad : null, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '', aEstado(f), f.obs || '', f.id]);
       cantidad(row.getCell(9), f.contado, f.sistema); if (r) cantidad(row.getCell(10), r.cantidad, f.sistema);
       if (f.lote_real) pinta(row.getCell(11), 'FFFAEEDA', 'FF633806'); if (f.vcto_real) pinta(row.getCell(12), 'FFFAEEDA', 'FF633806');
       pinta(row.getCell(13), 'FFE6F1FB', 'FF0C447C'); pinta(row.getCell(14), 'FFE6F1FB', 'FF0C447C');
@@ -391,12 +414,14 @@
     par('Paquete bajado el', fmtVcto(hoy[0]) + ' ' + hoy[1]); rs.addRow([]);
     par('Posiciones', res.total, true); par('Contadas', res.contadas); par('Sin contar', res.sin_contar); par('Contadas como vacías', res.vacias);
     par('Con menos que el sistema (rojo)', res.menos); par('Con más que el sistema (azul)', res.mas); par('Con lote o vencimiento distinto', res.lote_vcto); par('Reconteos pedidos', res.reconteos);
+    if (res.conformes !== undefined) { par('Conformes (cuadran con el sistema)', res.conformes); par('Ajustadas', res.ajustadas); par('No ajustadas', res.no_ajustadas); par('Con diferencia sin revisar', res.sin_revisar); }   // toma archivada con una versión anterior: no trae estas cifras
     par('Unidades', Object.keys(res.unidades).map(function (k) { return k + ': ' + res.unidades[k]; }).join(' · ')); rs.addRow([]);
     par('Última persona que contó cada posición', 'Posiciones', true); res.contadores.forEach(function (c) { par(c.usuario, c.posiciones); }); rs.addRow([]);
     par('Cómo leer este archivo', '', true);
     par('Toma', 'Una fila por posición. Diferencia = contado − sistema (rojo: menos · azul: más). El reconteo se muestra aparte.');
     par('Versiones', 'Cada vez que alguien guardó una cantidad, con la anterior, la hora del celular y la del servidor. Para trazabilidad y tiempos.');
-    par('Unidades', 'Cada pasillo, torre o reconteo: quién lo contó, cuándo lo tomó y cuándo lo cerró (minutos).');
+    par('Unidades', 'Cada pasillo, torre o reconteo: quién lo contó, cuándo lo tomó y cuándo lo cerró (minutos); y quién lo ajustó, cuándo lo tomó y cuándo terminó.');
+    par('Estado ajuste', 'Conforme = el valor que vale (último reconteo, si no el primer conteo) cuadra con el sistema. Ajustado / No ajustado = lo que anotó el ajustador.');
     par('Eventos y Anotaciones', 'Lo que pasó en la toma (liberaciones con su motivo, reconteos) y todo lo que anotó el ajustador.');
     par('Por artículo', 'Falta o sobra por código sumando todas sus ubicaciones. Guarda el paquete de cada toma: un código que falta o sobra toma tras toma es lo que hay que investigar.');
     par('Clave de ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.');
@@ -405,28 +430,29 @@
 
     var ws = wb.addWorksheet('Toma', { views: [{ state: 'frozen', ySplit: 1 }] });
     encabezado(ws, [['Nave', 8], ['Pasillo / Torre', 14], ['UDC', 10], ['Celda', 9], ['POS', 7], ['Código', 12], ['Descripción', 34], ['Lote', 13], ['Vcto', 12], ['Stock sistema', 13], ['Contado', 11], ['Diferencia', 12],
-      ['Reconteo', 11], ['Dif. reconteo', 13], ['Lote real', 13], ['Vcto real', 12], ['Situación', 12], ['Contó', 12], ['Hora', 17], ['Reconteo por', 13], ['Estado ajuste', 14], ['Obs ajustador', 30], ['Ajustó', 12], ['Obs contador', 30],
+      ['Reconteo', 11], ['Dif. reconteo', 13], ['Lote real', 13], ['Vcto real', 12], ['Situación', 12], ['Contó', 12], ['Hora', 17], ['Reconteo por', 13], ['Estado ajuste', 14], ['Obs ajustador', 30], ['Ajustó', 12], ['Hora ajuste', 17], ['Obs contador', 30],
       ['Clave ubicación', 26], ['ID toma', 18], ['CLAVE', 22]]);
     filas.forEach(function (f) {
       var torre = f.torre !== null && f.torre !== undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
       var row = ws.addRow([torre ? 'Modula' : f.nave, torre ? 'Torre ' + f.torre : f.pasillo, String(f.udc), f.celda, f.pos, aCod(f), f.descripcion || '', aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema,
         f.contado, f.contado === null ? '' : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? '' : f.reconteo - f.sistema, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '',
-        f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.obs_contador || '', f.clave || '', toma.id, f.id]);
+        f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.ajuste_hora || '', f.obs_contador || '', f.clave || '', toma.id, f.id]);
       cantidad(row.getCell(11), f.contado, f.sistema); if (!sinRec) cantidad(row.getCell(13), f.reconteo, f.sistema);
       if (f.lote_real) pinta(row.getCell(15), 'FFFAEEDA', 'FF633806'); if (f.vcto_real) pinta(row.getCell(16), 'FFFAEEDA', 'FF633806');
     });
-    ws.getColumn(27).hidden = true;                       // CLAVE: identifica la posición dentro de la toma (útil para otro sistema); no estorba a la vista
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 27 } };
+    ws.getColumn(28).hidden = true;                       // CLAVE: identifica la posición dentro de la toma (útil para otro sistema); no estorba a la vista
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 28 } };
 
     hojaDe(wb, 'Versiones', [['ID toma', 18], ['Clave ubicación', 26], ['Unidad', 22], ['UDC', 10], ['POS', 7], ['Código', 12], ['Contador', 13], ['Cantidad', 10], ['Cantidad anterior', 11], ['N.º versión', 9], ['Vacía', 8],
       ['Hora (celular)', 20], ['Hora (servidor)', 20], ['Segundos desde su guardado anterior', 16], ['Lote real', 13], ['Vcto real', 12], ['Obs', 28], ['Es reconteo', 10], ['N.º pedido', 9]], d.versiones, function (v) {
         return [toma.id, v.clave || '', v.unidad || '', v.udc ? String(v.udc) : '', v.pos || '', v.codigo || '', v.usuario, v.cantidad, v.antes === null || v.antes === undefined ? null : v.antes, v.version, v.vacia ? 'Sí' : 'No',
           horaExcel(v.hora), horaExcel(v.hora_srv), v.seg === null || v.seg === undefined ? null : v.seg, v.lote_real || '', v.vcto_real ? fmtVcto(v.vcto_real) : '', v.obs || '', v.reconteo ? 'Sí' : 'No', v.pedido_n === null || v.pedido_n === undefined ? null : v.pedido_n]; });
     hojaDe(wb, 'Unidades', [['ID toma', 18], ['Unidad', 24], ['Tipo', 9], ['Zona', 12], ['Nave', 7], ['Pasillo / Torre', 14], ['Estado', 12], ['Contador', 13], ['Tomada', 20], ['Cerrada por', 13], ['Cerrada', 20], ['Minutos', 9],
-      ['Posiciones', 10], ['Contadas', 10], ['Versiones', 10], ['Reconteo de', 14], ['N.º pedido', 9], ['Pedido por', 13], ['Pedido el', 20], ['Último movimiento', 20]], d.unidades, function (u) {
+      ['Posiciones', 10], ['Contadas', 10], ['Versiones', 10], ['Reconteo de', 14], ['N.º pedido', 9], ['Pedido por', 13], ['Pedido el', 20], ['Último movimiento', 20], ['Ajustador', 13], ['Ajuste tomado', 20], ['Ajuste terminado', 20], ['Minutos de ajuste', 10]], d.unidades, function (u) {
         var torre = u.torre !== null && u.torre !== undefined;
         return [toma.id, u.nombre, u.tipo, u.zona || '', torre ? '' : u.nave, torre ? 'Torre ' + u.torre : u.pasillo, u.estado, u.operador || '', horaExcel(u.tomado_en), u.cerrado_por || '', horaExcel(u.cerrado_en),
-          u.minutos === null || u.minutos === undefined ? null : u.minutos, u.posiciones, u.contadas, u.versiones, u.reconteo_de || '', u.pedido_n === null || u.pedido_n === undefined ? null : u.pedido_n, u.pedido_por || '', horaExcel(u.pedido_en), horaExcel(u.ultimo_movimiento)]; });
+          u.minutos === null || u.minutos === undefined ? null : u.minutos, u.posiciones, u.contadas, u.versiones, u.reconteo_de || '', u.pedido_n === null || u.pedido_n === undefined ? null : u.pedido_n, u.pedido_por || '', horaExcel(u.pedido_en), horaExcel(u.ultimo_movimiento),
+          u.ajustador || '', horaExcel(u.ajuste_tomado_en), horaExcel(u.ajuste_terminado_en), u.ajuste_minutos === null || u.ajuste_minutos === undefined ? null : u.ajuste_minutos]; });
     hojaDe(wb, 'Eventos', [['ID toma', 18], ['Hora', 20], ['Usuario', 14], ['Acción', 24], ['Detalle', 70]], d.eventos, function (e) { return [toma.id, horaExcel(e.ts), e.usuario || '', e.accion, e.detalle || '']; });
     hojaDe(wb, 'Anotaciones', [['ID toma', 18], ['Hora', 20], ['Ajustador', 13], ['Clave ubicación', 26], ['Unidad', 22], ['UDC', 10], ['POS', 7], ['Código', 12], ['Estado', 14], ['Obs', 40]], d.anotaciones, function (a) {
       return [toma.id, horaExcel(a.ts), a.ajustador, a.clave || '', a.unidad || '', a.udc ? String(a.udc) : '', a.pos || '', a.codigo || '', a.estado || '', a.obs || '']; });
@@ -1047,6 +1073,47 @@
       var i = document.querySelector('input[data-q="' + fila + '"]'); if (i) i.value = String(n);
     },
     abrirAjuste: function (b) { AJ = { id: b.dataset.id, datos: null, sel: {}, filtro: 'todas', cur: null, err: '', verCompletos: false }; S.vista = 'ajuste'; render(); window.scrollTo(0, 0); cargarAjuste(); },
+    tomarAjuste: function (b) {
+      var id = b.dataset.id; ocupar(b, 'Tomando…');
+      api('tomarAjuste', { id: id }).then(function (r) {
+        liberarBoton(b);
+        if (!r.ok) { toast(r.mensaje || 'No se pudo tomar el pasillo.'); return cargarUnidades(true); }
+        ACC.abrirAjuste({ dataset: { id: id } });
+      });
+    },
+    tomarAjusteAqui: function (b) {
+      ocupar(b, 'Tomando…');
+      api('tomarAjuste', { id: AJ.id }).then(function (r) {
+        liberarBoton(b);
+        if (!r.ok) { toast(r.mensaje || 'No se pudo tomar el pasillo.'); return cargarAjuste(); }
+        toast('Pasillo tomado: ahora es tuyo.'); cargarAjuste();
+      });
+    },
+    pedirTerminarAjuste: function () {
+      var d = AJ.datos; if (!d) return; var faltan = aFaltan(d);
+      if (faltan > 0) return modal('<h3>Faltan ' + faltan + ' por marcar</h3><p>Cada posición con diferencia debe quedar como Ajustado o No ajustado antes de terminar. Usa el filtro «Sin marcar» para verlas.</p><div id="msg"></div><div class="botones"><button class="btn rel" data-a="cerrarModal">Entendido</button></div>');
+      var conf = d.filas.filter(function (f) { return aMuestra(f) && aConforme(f) && f.contado !== null; }).length;
+      confirmar('Terminar de ajustar', 'Las ' + conf + ' posiciones que cuadran con el sistema quedan como Conforme. Después ya no podrás anotar ni pedir reconteos; solo el administrador puede liberar el ajuste. Las posiciones sin contar no impiden terminar.', 'Terminar', 'terminarAjuste', AJ.id);
+    },
+    terminarAjuste: function (b) {
+      ocupar(b, 'Terminando…');
+      api('terminarAjuste', { id: b.dataset.id }).then(function (r) {
+        if (!r.ok) { liberarBoton(b); mostrarError(null, r.mensaje || 'No se pudo terminar.'); return cargarAjuste(true); }
+        cerrarModal(); toast('Ajuste terminado: ' + r.conformes + ' conformes · ' + r.ajustadas + ' ajustadas · ' + r.no_ajustadas + ' no ajustadas.'); cargarAjuste();
+      });
+    },
+    pedirLiberarAjuste: function (b) {
+      var u = unidadPorId(b.dataset.id);
+      confirmar('Liberar el ajuste de ' + nombreUnidad(u), 'Lo ajustaba ' + (u && u.ajustador) + '. Sus anotaciones se conservan; otro ajustador podrá tomarlo. Escribe el motivo; queda en el historial.', 'Liberar ajuste', 'liberarAjuste', b.dataset.id,
+        '<div class="campo"><label for="mot">Motivo</label><input id="mot" autocomplete="off"></div>');
+    },
+    liberarAjuste: function (b) {
+      var mot = ($capa.querySelector('#mot') || {}).value || ''; ocupar(b, 'Liberando…');
+      api('liberarAjuste', { id: b.dataset.id, motivo: mot }).then(function (r) {
+        if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje); }
+        cerrarModal(); toast('Ajuste liberado.'); cargarSegunVista();
+      });
+    },
     ajrecargar: function () { AJ.err = ''; if (!AJ.datos) render(); cargarAjuste(); },
     ajfiltro: function (b) { AJ.filtro = b.dataset.id; renderConScroll(); },
     enviarReconteo: function (b) {
@@ -1332,7 +1399,7 @@
     var id = i.dataset.e || i.dataset.o; if (!id) return;
     var f = AJ.datos.filas.filter(function (x) { return x.id === id; })[0]; if (!f) return;
     if (i.dataset.e) f.estado = i.value || null; else f.obs = i.value.trim();
-    api('anotarAjustes', { items: [{ fila: id, estado: f.estado || '', obs: f.obs || '' }] }).then(function (r) { if (!r.ok) toast(r.mensaje || 'No se pudo guardar la anotación.'); });
+    api('anotarAjustes', { items: [{ fila: id, estado: f.estado || '', obs: f.obs || '' }] }).then(function (r) { if (!r.ok) { toast(r.mensaje || 'No se pudo guardar la anotación.'); cargarAjuste(); } });
   });
   document.addEventListener('click', function (e) {
     if (S.vista !== 'ajuste' || !AJ.datos) return;
