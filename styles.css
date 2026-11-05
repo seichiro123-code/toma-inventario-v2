@@ -18,7 +18,7 @@ button{cursor:pointer}
 :focus-visible{outline:3px solid var(--amb);outline-offset:2px}
 #app{min-height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column}
 .pantalla{display:flex;flex-direction:column;min-height:100vh;min-height:100dvh}
-.cuerpo{flex:1;padding:0 0 calc(76px + env(safe-area-inset-bottom))}
+.cuerpo{flex:1;padding:0 0 calc(96px + env(safe-area-inset-bottom))}
 
 /* cabecera */
 .cab{background:var(--azulbg);padding:calc(10px + env(safe-area-inset-top)) 14px 12px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #1d3a7a}
@@ -174,8 +174,11 @@ button{cursor:pointer}
 .obs{margin-top:4px;font-size:12.5px;color:var(--amb);overflow-wrap:anywhere}
 .regbtn{margin-top:6px;min-height:36px;padding:0 12px;border-radius:6px;border:1.5px solid var(--azul2);background:none;color:var(--azul2);font:700 15px var(--f-cond)}
 .fc .cod .pill{margin-left:8px}
-.barra-esc{padding:12px 14px 0}
-.barra-esc .btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:48px;font-size:19px}
+/* botón flotante del escáner: se queda fijo abajo a la derecha al desplazar la lista (por debajo de los cuadros, z-index 20) */
+.fab{position:fixed;right:max(16px,env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:15;display:flex;align-items:center;gap:8px;min-height:56px;padding:0 20px 0 16px;border-radius:28px;border:0;background:var(--amb);color:#1a1200;font:700 19px var(--f-cond);box-shadow:0 4px 14px rgba(0,0,0,.5)}
+.fab:active{transform:scale(.97)}
+@media (min-width:600px){.fab{right:calc(50% - 264px)}}
+@media (prefers-reduced-motion:reduce){.fab:active{transform:none}}
 .fila-in{display:flex;gap:8px}
 .fila-in input{flex:1;min-width:0}
 .fila-in .btn{flex:0 0 auto}

@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.6';
+  var CFG = window.CONFIG, VERSION = 'F4.7';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -462,6 +462,10 @@
     pa.eachRow(function (row, n) { if (n > 1) { var r = row.getCell(14).value; if (r === 'Falta') pinta(row.getCell(14), 'FFF7C1C1', 'FF791F1F'); else if (r === 'Sobra') pinta(row.getCell(14), 'FFB5D4F4', 'FF0C447C'); } });
     return wb.xlsx.writeBuffer();
   }
+  // Aviso que se queda en pantalla hasta que la persona lo cierra (un toast de 3 s se pierde si miras otra cosa)
+  function avisoPaquete(titulo, archivo, texto, malo) {
+    modal('<h3>' + esc(titulo) + '</h3>' + (archivo ? '<p><b>' + esc(archivo) + '</b></p>' : '') + '<p>' + esc(texto) + '</p>' + (archivo && !malo ? '<p class="ayuda">Búscalo en la carpeta de Descargas de este dispositivo.</p>' : '') + '<div class="botones"><button class="btn rel" data-a="cerrarModal">Entendido</button></div>');
+  }
   function descargarArchivo(buf, nombre) {
     var a = document.createElement('a'), url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
     a.href = url; a.download = nombre; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 1500);
@@ -798,7 +802,7 @@
     });
     return (CT.fuera ? '<div class="aviso" style="margin:12px 14px 0">Sin conexión: se muestran los datos guardados en tu celular.</div>' : '') +
       progresoHtml(f, torre ? 'Escribe la cantidad o toca Vacía' : 'Escribe la cantidad o toca Vacía en cada posición') +
-      (camaraDisponible() ? '<div class="barra-esc"><button class="btn gr ancho" data-a="escanear"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M7 12h10"/></svg> Escanear artículo</button></div>' : '') +
+      (camaraDisponible() ? '<button class="fab" data-a="escanear" aria-label="Escanear artículo"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V5a1 1 0 011-1h3M16 4h3a1 1 0 011 1v3M20 16v3a1 1 0 01-1 1h-3M8 20H5a1 1 0 01-1-1v-3M7 12h10"/></svg><span>Escanear</span></button>' : '') +
       '<div class="seg" role="group"><button data-a="filtro" data-id="todas" aria-pressed="' + (CT.filtro === 'todas') + '">Todas</button><button data-a="filtro" data-id="pend" aria-pressed="' + (CT.filtro === 'pend') + '">Pendientes</button></div>' +
       '<ul class="lista pos-lista' + (CT.filtro === 'pend' ? ' solopend' : '') + '" id="posl">' + h + '</ul>' +
       '<p class="pie">Se guarda en tu celular al instante y se envía sola. Si una posición está vacía, toca <b>Vacía</b>.</p>' + (torre ? '' : botonCerrar());
@@ -1152,14 +1156,16 @@
         var pos = v[1], toma = pos.primero.toma, cont = { posiciones: pos.filas.length, versiones: v[2].filas.length, unidades: v[3].filas.length, eventos: v[4].filas.length, anotaciones: v[5].filas.length };
         return armarPaquete(toma, pos.primero.resumen, pos.filas, { versiones: v[2].filas, unidades: v[3].filas, eventos: v[4].filas, anotaciones: v[5].filas }).then(function (buf) {
           var hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10), nom = String(toma.nombre).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'toma';
-          descargarArchivo(buf, 'Paquete_' + nom + '_' + hoy + '.xlsx'); liberarBoton(b);
-          if (toma.estado !== 'cerrada') return toast('Paquete listo (' + cont.posiciones + ' posiciones). La toma sigue abierta: es una foto de este momento.');
+          var archivo = 'Paquete_' + nom + '_' + hoy + '.xlsx'; descargarArchivo(buf, archivo); liberarBoton(b);
+          if (toma.estado !== 'cerrada') return avisoPaquete('Paquete descargado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalo otra vez.');
           // toma cerrada: el servidor coteja lo recibido; si coincide, queda anotado y se podrá archivar
           return api('registrarPaquete', { id: id, conteos: cont }).then(function (r) {
-            toast(r.ok ? 'Paquete listo y registrado. Ábrelo y revísalo antes de archivar la toma.' : (r.mensaje || 'El paquete se bajó, pero no se pudo registrar.')); return recargarTomas();
+            if (r.ok) avisoPaquete('Paquete descargado y registrado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. Ábrelo y comprueba que está completo antes de archivar la toma.');
+            else avisoPaquete('El paquete se bajó, pero no quedó registrado', archivo, (r.mensaje || 'No se pudo registrar.') + ' Sin registro no se puede archivar la toma: descárgalo de nuevo.', true);
+            return recargarTomas();
           });
         });
-      }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el paquete.'); });
+      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el paquete', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
     pedirArchivar: function (b) {
       var t = (S.tomas || []).filter(function (x) { return x.id === b.dataset.id; })[0]; if (!t) return;
