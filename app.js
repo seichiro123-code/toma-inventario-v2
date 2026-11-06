@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.8';
+  var CFG = window.CONFIG, VERSION = 'F4.9';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -514,7 +514,9 @@
     h += cajaPegado('pegadoBarras', 'Catálogo de códigos de barra (opcional)', 'ARTICULO, CODIGO DE BARRA UND, CODIGO DE BARRA CAJA', S.pegadoBarras);
     if (!abierta) h += '<div class="campo"><label for="nombreToma">Nombre de la toma (opcional)</label><input id="nombreToma" value="' + esc(S.nombreToma) + '" maxlength="60" autocomplete="off"></div>';
     h += '<button class="btn amb ancho" data-a="validar"' + (S.ocupado || !S.pegado ? ' disabled' : '') + '>' + (S.ocupado ? 'Validando…' : 'Validar datos') + '</button>';
-    if (S.pegadoBarras) h += '<button class="btn gr ancho" data-a="guardarCatalogo">Guardar catálogo de barras</button>';
+    if (S.pegadoBarras) h += '<button class="btn amb ancho" data-a="agregarCatalogo">Agregar al catálogo</button>' +
+      '<button class="btn gr ancho" data-a="pedirReemplazarCatalogo">Reemplazar todo el catálogo</button>' +
+      '<p class="pie" style="padding:0 0 8px"><b>Agregar</b> suma los códigos nuevos y completa los que faltaban; no borra nada. <b>Reemplazar</b> deja solo lo pegado aquí.</p>';
     if (inf) {
       h += '<div class="tarjetas" style="padding:0"><div class="tj"><small>Filas leídas</small><b>' + inf.informe.filas_leidas + '</b></div><div class="tj"><small>Unidades</small><b>' + inf.informe.unidades_conteo + '</b></div>' +
         '<div class="tj"><small>Pasillos</small><b>' + inf.informe.pasillos + '</b></div><div class="tj"><small>Torres Modula</small><b>' + inf.informe.torres + '</b></div></div>';
@@ -1293,9 +1295,24 @@
       });
     },
     borrarPegado: function (b) { if (b.dataset.id === 'pegadoBarras') S.pegadoBarras = ''; else { S.pegado = ''; S.informe = null; } renderConScroll(); },
-    guardarCatalogo: function (b) {
-      ocupar(b, 'Guardando…');
-      api('cargarBarras', { texto: S.pegadoBarras }).then(function (r) { liberarBoton(b); if (!r.ok) return toast(r.mensaje || 'No se pudo guardar el catálogo.'); toast('Catálogo guardado: ' + r.articulos + ' artículos.'); });
+    agregarCatalogo: function (b) {
+      ocupar(b, 'Agregando…');
+      api('agregarBarras', { texto: S.pegadoBarras }).then(function (r) {
+        liberarBoton(b); if (!r.ok) return toast(r.mensaje || 'No se pudo agregar al catálogo.');
+        S.pegadoBarras = ''; renderConScroll();
+        toast('Catálogo actualizado: ' + r.nuevos + ' nuevos, ' + r.actualizados + ' completados. Ahora hay ' + r.articulos + ' artículos.');
+        if (r.barras_repetidas) modal('<h3>' + r.barras_repetidas + ' código(s) de barra repetido(s)</h3><p>Hay códigos de barra que quedaron en dos artículos distintos. Al escanearlos, la app podría mostrar el artículo equivocado. Revisa el catálogo en tu Excel y vuelve a agregar los corregidos.</p><div class="botones"><button class="btn amb" data-a="cerrarModal">Entendido</button></div>', true);
+      });
+    },
+    pedirReemplazarCatalogo: function () {
+      modal('<h3>¿Reemplazar todo el catálogo?</h3><p>Se borra el catálogo que está guardado y queda solo lo que pegaste (' + (S.pegadoBarras.split('\n').length - 1) + ' líneas aprox.). Si solo tienes códigos nuevos, usa <b>Agregar al catálogo</b>.</p><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn pel" data-a="reemplazarCatalogo">Reemplazar todo</button></div>');
+    },
+    reemplazarCatalogo: function (b) {
+      ocupar(b, 'Reemplazando…');
+      api('cargarBarras', { texto: S.pegadoBarras }).then(function (r) {
+        if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje || 'No se pudo reemplazar el catálogo.'); }
+        cerrarModal(); S.pegadoBarras = ''; renderConScroll(); toast('Catálogo reemplazado: ' + r.articulos + ' artículos.');
+      });
     },
     validar: function () {
       if (!S.pegado) return toast('Primero pega los datos.');
