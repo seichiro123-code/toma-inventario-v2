@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.10';
+  var CFG = window.CONFIG, VERSION = 'F4.11';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -307,7 +307,7 @@
     var dif = filas.filter(aDif), sin = aFaltan(d), conf = filas.filter(function (f) { return aConforme(f) && f.contado !== null; }).length;
     var aviso = '';
     if (u.estado === 'En conteo') aviso = 'Esta unidad todavía se está contando (' + esc(u.operador) + '). Los números pueden cambiar.';
-    else if (!u.ajustador) aviso = S.ses.rol === 'ajustador' ? 'Nadie ajusta este pasillo. Tómalo para anotar y pedir reconteos. <button class="btn peq" data-a="tomarAjusteAqui">Tomar este pasillo</button>' : 'Nadie ajusta este pasillo todavía.';
+    else if (!u.ajustador) aviso = (S.ses.rol === 'ajustador' || S.ses.rol === 'administrador') ? 'Nadie ajusta este pasillo. Tómalo para anotar y pedir reconteos. <button class="btn peq" data-a="tomarAjusteAqui">Tomar este pasillo</button>' : 'Nadie ajusta este pasillo todavía.';
     else if (u.ajuste_terminado_en) aviso = (u.ajustador === yo ? 'Terminaste' : esc(u.ajustador) + ' terminó') + ' de ajustar este pasillo. Solo lectura. Si hay que corregir algo, el administrador libera el ajuste.';
     else if (u.ajustador !== yo) aviso = 'Este pasillo lo ajusta <b>' + esc(u.ajustador) + '</b>. Solo puedes mirarlo.';
     var chips = [['todas', 'Todas'], ['dif', 'Solo diferencias'], ['lote', 'Lote o vcto distinto'], ['sin', 'Sin marcar']].map(function (x) {
@@ -477,10 +477,11 @@
     avance: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',
     carga: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>',
     usuarios: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M17 4.5a3.5 3.5 0 010 7M21.5 20c0-2.8-1.5-4.7-3.8-5.6"/></svg>',
+    ajuste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>',
     historial: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.4M3 4v4h4M12 7v5l3 2"/></svg>'
   };
   function navAdmin() {
-    var t = [['avance', 'Avance'], ['carga', 'Carga'], ['usuarios', 'Usuarios'], ['historial', 'Historial']];
+    var t = [['avance', 'Avance'], ['carga', 'Carga'], ['ajuste', 'Ajuste'], ['usuarios', 'Usuarios'], ['historial', 'Historial']];
     return '<nav class="nav" role="tablist">' + t.map(function (x) { return '<button role="tab" aria-selected="' + (S.adminTab === x[0]) + '" data-a="admtab" data-id="' + x[0] + '">' + ICONOS[x[0]] + x[1] + '</button>'; }).join('') + '</nav>';
   }
   function adminAvance() {
@@ -495,6 +496,11 @@
       return '<li class="fila"><div class="info"><div class="nom">' + esc(o.usuario) + '</div><div class="det">' + o.en_conteo + ' en conteo · ' + o.cerradas + ' cerradas</div></div><b class="mono">' + o.posiciones + '</b></li>'; }).join('') + '</ul>' : '';
     return resumenBarra(un) + tot + '<div class="tarjetas"><div class="tj"><small>Pendientes</small><b>' + c.Pendiente + '</b></div><div class="tj amb"><small>En conteo</small><b>' + c['En conteo'] + '</b></div>' +
       '<div class="tj ver"><small>Cerradas</small><b>' + c.cer + '</b></div><div class="tj"><small>Unidades</small><b>' + un.length + '</b></div></div>' + ops + secciones;
+  }
+  // el administrador ajusta como un ajustador: toma un pasillo contado y queda a su nombre (misma lista y misma tabla que el ajustador)
+  function adminAjuste() {
+    var d = S.datos; if (!d) return cargando(); if (!d.toma_activa) return vacioToma();
+    return listaPorTabs('ajuste') + '<p class="pie">Toma un pasillo ya contado para ajustarlo: queda a tu nombre y nadie más puede anotar en él. Con «Ver» solo miras.</p>';
   }
   function kb(n) { return Math.max(1, Math.round(n / 1024)) + ' KB'; }
   function cajaPegado(id, titulo, ayuda, valor) {
@@ -575,8 +581,8 @@
       return '<li class="fila"><div class="info"><div class="nom">' + esc(e.accion) + '</div><div class="det">' + esc(e.usuario) + (e.detalle ? ' · ' + esc(e.detalle) : '') + '</div><div class="t">' + esc(fecha(e.ts)) + '</div></div></li>'; }).join('') + '</ul>';
   }
   function vistaAdmin() {
-    var t = { avance: 'Avance', carga: 'Carga de datos', usuarios: 'Usuarios', historial: 'Historial' }[S.adminTab];
-    var c = S.adminTab === 'avance' ? adminAvance() : S.adminTab === 'carga' ? adminCarga() : S.adminTab === 'usuarios' ? adminUsuarios() : adminHistorial();
+    var t = { avance: 'Avance', carga: 'Carga de datos', ajuste: 'Ajustes', usuarios: 'Usuarios', historial: 'Historial' }[S.adminTab];
+    var c = S.adminTab === 'avance' ? adminAvance() : S.adminTab === 'carga' ? adminCarga() : S.adminTab === 'ajuste' ? adminAjuste() : S.adminTab === 'usuarios' ? adminUsuarios() : adminHistorial();
     return '<main class="pantalla">' + cabecera(t, S.ses.usuario + ' · administrador') + '<div class="cuerpo">' + c + '</div>' + navAdmin() + '</main>';
   }
 
