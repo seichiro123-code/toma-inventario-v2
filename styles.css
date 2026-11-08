@@ -235,3 +235,4 @@ button{cursor:pointer}
 .ajg{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:8px 0}
 .ajg>div{background:var(--pan2);border-radius:6px;padding:8px 10px} .ajg small{display:block;color:var(--tx2);font-size:12px} .ajg b{font:700 22px var(--f-mono)}
 .lect{color:var(--tx2);font-size:14px} .ped{font-size:14px;padding:3px 0}
+.campo label .op{font-weight:500;letter-spacing:.04em;text-transform:none;color:var(--tx2)}
