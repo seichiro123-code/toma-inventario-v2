@@ -236,3 +236,16 @@ button{cursor:pointer}
 .ajg>div{background:var(--pan2);border-radius:6px;padding:8px 10px} .ajg small{display:block;color:var(--tx2);font-size:12px} .ajg b{font:700 22px var(--f-mono)}
 .lect{color:var(--tx2);font-size:14px} .ped{font-size:14px;padding:3px 0}
 .campo label .op{font-weight:500;letter-spacing:.04em;text-transform:none;color:var(--tx2)}
+
+/* pantalla «En vivo» (maqueta 53) */
+.tarjetas.cuatro{grid-template-columns:repeat(4,1fr)}
+.tarjetas.cuatro .tj b{font-size:28px}
+.vseg{flex-wrap:wrap}
+.vivosel{min-height:44px;border-radius:6px;background:var(--pan);border:1px solid var(--borde);color:var(--tx);padding:0 8px;font-size:16px}
+.ajt.vivo{min-width:1000px}
+.ajt.vivo tr.gr td{background:#3a2410}
+.vest{display:inline-block;font:700 12px/1 var(--f-txt);letter-spacing:.4px;text-transform:uppercase;padding:5px 8px;border-radius:4px;border:1px solid var(--line)}
+.vest.ver{background:#05140c;color:var(--ver);border-color:#14502f}
+.vest.rojo{background:var(--rojobg);color:var(--rojo);border-color:#6B1F22}
+.vest.nar{background:#3a2410;color:var(--nar);border-color:#7a4a1a}
+@media (max-width:480px){.tarjetas.cuatro{grid-template-columns:1fr 1fr}}

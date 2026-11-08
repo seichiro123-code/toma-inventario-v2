@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.11';
+  var CFG = window.CONFIG, VERSION = 'F4.12';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -96,6 +96,7 @@
     if (S.ses.rol === 'administrador') {
       if (S.adminTab === 'usuarios') return api('listarUsuarios').then(function (r) { if (r.ok) { S.errCarga = ''; S.usuarios = r.usuarios; renderConScroll(); } else if (!S.usuarios) { S.errCarga = r.mensaje; render(); } else toast(r.mensaje); });
       if (S.adminTab === 'historial') return buscarHistorial();
+      if (S.adminTab === 'vivo') return api('enVivo').then(function (r) { if (r.ok) { S.errCarga = ''; S.vivo = r; renderConScroll(); } else if (!S.vivo) { S.errCarga = r.mensaje; render(); } });
       if (S.adminTab === 'avance') api('avance').then(function (r) { if (r.ok && r.toma_activa) { S.av = r; renderConScroll(); } });
       if (S.adminTab === 'carga') api('listarTomas').then(function (r) { if (r.ok && JSON.stringify(r.tomas) !== JSON.stringify(S.tomas)) { S.tomas = r.tomas; renderConScroll(); } });
     }
@@ -478,10 +479,11 @@
     carga: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>',
     usuarios: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6M17 4.5a3.5 3.5 0 010 7M21.5 20c0-2.8-1.5-4.7-3.8-5.6"/></svg>',
     ajuste: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>',
+    vivo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M5.6 5.6a9 9 0 000 12.8M18.4 5.6a9 9 0 010 12.8M8.5 8.5a5 5 0 000 7M15.5 8.5a5 5 0 010 7"/></svg>',
     historial: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.4M3 4v4h4M12 7v5l3 2"/></svg>'
   };
   function navAdmin() {
-    var t = [['avance', 'Avance'], ['carga', 'Carga'], ['ajuste', 'Ajuste'], ['usuarios', 'Usuarios'], ['historial', 'Historial']];
+    var t = [['avance', 'Avance'], ['vivo', 'En vivo'], ['carga', 'Carga'], ['ajuste', 'Ajuste'], ['usuarios', 'Usuarios'], ['historial', 'Historial']];
     return '<nav class="nav" role="tablist">' + t.map(function (x) { return '<button role="tab" aria-selected="' + (S.adminTab === x[0]) + '" data-a="admtab" data-id="' + x[0] + '">' + ICONOS[x[0]] + x[1] + '</button>'; }).join('') + '</nav>';
   }
   function adminAvance() {
@@ -580,9 +582,46 @@
     return h + '<ul class="lista hist">' + S.historial.map(function (e) {
       return '<li class="fila"><div class="info"><div class="nom">' + esc(e.accion) + '</div><div class="det">' + esc(e.usuario) + (e.detalle ? ' · ' + esc(e.detalle) : '') + '</div><div class="t">' + esc(fecha(e.ts)) + '</div></div></li>'; }).join('') + '</ul>';
   }
+  // pantalla «En vivo» (maqueta 53): lo último que contó cada persona junto al stock del sistema, solo para el administrador.
+  // Sirve para ver al momento quién contó distinto y dónde, e ir a decirle que valide. El contador nunca ve esta pantalla ni el stock.
+  var VIVO_ESTADOS = { conforme: ['Conforme', 'ver'], sobrante: ['Sobrante', 'rojo'], faltante: ['Faltante', 'nar'] };
+  function vivoDif(f) { return (f.contado || 0) - (f.stock || 0); }
+  function vivoEstado(f) { var d = vivoDif(f); return d === 0 ? 'conforme' : d > 0 ? 'sobrante' : 'faltante'; }
+  // diferencia grande: 20 unidades o más y, si había stock, la mitad o más de ese stock
+  function vivoGrande(f) { var d = Math.abs(vivoDif(f)); return d >= 20 && (!f.stock || d >= f.stock * 0.5); }
+  function adminEnVivo() {
+    var d = S.vivo; if (!d) return S.errCarga ? '<div class="vacio"><h2>No se pudo cargar</h2><p>' + esc(S.errCarga) + '</p><button class="btn rel" data-a="recargar">Reintentar</button></div>' : cargando();
+    if (!d.toma_activa) return '<div class="vacio"><h2>No hay una toma abierta</h2><p>Cuando abras una, aquí verás lo que se va contando.</p></div>';
+    var fi = S.vivoFiltro || 'todos', ct = S.vivoCont || '', gr = 0;
+    var cont = {}; d.filas.forEach(function (f) { cont[f.contador] = 1; if (vivoGrande(f)) gr++; });
+    var vis = d.filas.filter(function (f) {
+      if (ct && f.contador !== ct) return false;
+      if (fi === 'dif') return vivoDif(f) !== 0;
+      if (fi === 'sobrante' || fi === 'faltante') return vivoEstado(f) === fi;
+      if (fi === 'grande') return vivoGrande(f);
+      return true;
+    });
+    var r = d.resumen;
+    var chips = [['todos', 'Todos'], ['dif', 'Solo diferencias'], ['faltante', 'Faltante'], ['sobrante', 'Sobrante'], ['grande', '⚠ Diferencia grande (' + gr + ')']].map(function (x) {
+      return '<button data-a="vivofiltro" data-id="' + x[0] + '" aria-pressed="' + (fi === x[0]) + '">' + x[1] + '</button>'; }).join('');
+    var sel = '<select class="vivosel" data-vivo="cont" aria-label="Filtrar por contador"><option value="">Todos los contadores</option>' + Object.keys(cont).sort().map(function (n) { return '<option value="' + esc(n) + '"' + (n === ct ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>';
+    var filas = vis.map(function (f) {
+      var e = VIVO_ESTADOS[vivoEstado(f)], dif = vivoDif(f), lote = f.lote_real || f.lote || '', vc = f.vcto_real || f.vcto || '';
+      return '<tr' + (vivoGrande(f) ? ' class="gr"' : '') + '><td class="mono">' + esc(f.hora) + '</td><td>' + esc(f.contador) + (f.reconteo ? ' <span class="chip pen">reconteo</span>' : '') + '</td><td>' + esc(f.unidad) + '</td><td class="mono">' + esc(f.celda || '') + ' · ' + esc(String(f.udc || '')) + ' · ' + esc(String(f.pos || '')) + '</td>' +
+        '<td class="mono">' + esc(f.codigo) + '</td><td>' + esc(f.descripcion) + '</td><td>' + esc(lote) + '</td><td class="mono">' + esc(vc) + '</td>' +
+        '<td class="n">' + f.contado + '</td><td class="n">' + f.stock + '</td><td class="n">' + (dif > 0 ? '+' : '') + dif + (vivoGrande(f) ? ' ⚠' : '') + '</td>' +
+        '<td><span class="vest ' + e[1] + '">' + e[0] + '</span></td><td class="n">' + f.veces + '</td></tr>';
+    }).join('');
+    return '<div class="tarjetas cuatro"><div class="tj"><small>Contadas</small><b>' + r.contadas + '</b></div><div class="tj ver"><small>Conformes</small><b>' + r.conformes + '</b></div>' +
+      '<div class="tj rojo"><small>Sobrantes</small><b>' + r.sobrantes + '</b></div><div class="tj amb"><small>Faltantes</small><b>' + r.faltantes + '</b></div></div>' +
+      '<div class="ajbar"><div class="seg vseg" role="group">' + chips + '</div>' + sel + '<button class="ibtn" data-a="recargar" aria-label="Actualizar">↻</button></div>' +
+      '<div class="pie" style="padding:0 14px 8px">Se actualiza sola cada 15 segundos · ' + vis.length + ' de ' + d.filas.length + ' filas' + (d.resumen.contadas > d.filas.length ? ' (las ' + d.filas.length + ' más recientes)' : '') + '</div>' +
+      '<div class="ajw"><table class="ajt vivo"><thead><tr><th>Hora</th><th>Contador</th><th>Unidad</th><th>Celda · UDC · POS</th><th>Código</th><th>Descripción</th><th>Lote</th><th>Vcto</th><th class="n">Contado</th><th class="n">Stock</th><th class="n">Dif.</th><th>Estado</th><th class="n">Veces</th></tr></thead><tbody>' +
+      (filas || '<tr><td colspan="13" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>';
+  }
   function vistaAdmin() {
-    var t = { avance: 'Avance', carga: 'Carga de datos', ajuste: 'Ajustes', usuarios: 'Usuarios', historial: 'Historial' }[S.adminTab];
-    var c = S.adminTab === 'avance' ? adminAvance() : S.adminTab === 'carga' ? adminCarga() : S.adminTab === 'ajuste' ? adminAjuste() : S.adminTab === 'usuarios' ? adminUsuarios() : adminHistorial();
+    var t = { avance: 'Avance', vivo: 'En vivo', carga: 'Carga de datos', ajuste: 'Ajustes', usuarios: 'Usuarios', historial: 'Historial' }[S.adminTab];
+    var c = S.adminTab === 'avance' ? adminAvance() : S.adminTab === 'vivo' ? adminEnVivo() : S.adminTab === 'carga' ? adminCarga() : S.adminTab === 'ajuste' ? adminAjuste() : S.adminTab === 'usuarios' ? adminUsuarios() : adminHistorial();
     return '<main class="pantalla">' + cabecera(t, S.ses.usuario + ' · administrador') + '<div class="cuerpo">' + c + '</div>' + navAdmin() + '</main>';
   }
 
@@ -1048,6 +1087,7 @@
     tab: function (b) { S.tab = b.dataset.id; S.zona = null; render(); },
     zona: function (b) { S.zona = b.dataset.id; render(); },
     recargar: function () { if (S.vista === 'contar') { S.errCarga = ''; CT.datos = null; render(); cargarConteo(); return; } toast('Actualizando…'); S.errCarga = ''; render(); Promise.resolve(cargarSegunVista()).then(function () { if (S.online) toast('Lista al día.'); }); },
+    vivofiltro: function (b) { S.vivoFiltro = b.dataset.id; renderConScroll(); },
     admtab: function (b) { S.adminTab = b.dataset.id; S.filtroHist = ''; S.errCarga = ''; render(); window.scrollTo(0, 0); cargarSegunVista(); },
     atras: function () {
       if (S.vista === 'contar' && CT.datos && CT.datos.unidad.tipo === 'torre' && CT.udc) { CT.udc = null; render(); window.scrollTo(0, 0); return; }
@@ -1421,6 +1461,9 @@
     if (i.id === 'rk') { var d = document.getElementById('rdesc'); if (d) d.innerHTML = descReg(i.value.trim().toUpperCase()); }
     if (i.id === 'rv') { var w = document.getElementById('robsw'); if (w) w.hidden = !vencCorto(i.value); }
   });
+  document.addEventListener('change', function (e) { var i = e.target; if (i && i.matches && i.matches('select[data-vivo="cont"]')) { S.vivoCont = i.value; renderConScroll(); } });
+  // refresco de «En vivo» cada 15 s (solo con la pantalla visible y sin ventanas abiertas)
+  setInterval(function () { if (!document.hidden && S.ses && S.ses.rol === 'administrador' && S.vista === 'home' && S.adminTab === 'vivo' && $capa.className !== 'on' && !S.ocupado) cargarSegunVista(true); }, 15000);
   // pantalla del ajustador: casillas de reconteo, estado y observación, y fila elegida
   document.addEventListener('change', function (e) {
     var i = e.target; if (S.vista !== 'ajuste' || !AJ.datos || !i.matches) return;
