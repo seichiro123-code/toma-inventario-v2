@@ -1,9 +1,9 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.12';
+  var CFG = window.CONFIG, VERSION = 'F4.13';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
-            informe: null, pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
+            informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
 
   // ---------- utilidades ----------
@@ -150,22 +150,34 @@
 
   // ---------- CONTADOR / lista de unidades ----------
   function agrupar(un) {
-    var tabs = [], naves = {}, hayTorres = false;
+    var tabs = [], naves = {}, hayTorres = false, hayPunt = false;
     un.forEach(function (u) {
-      if (u.tipo === 'torre') hayTorres = true; else naves[u.nave] = 1;
+      if (u.tipo === 'torre') hayTorres = true; else if (u.tipo === 'puntual') hayPunt = true; else naves[u.nave] = 1;
     });
+    if (hayPunt) tabs.push({ id: 'PUN', nombre: 'Puntuales' });
     if (hayTorres) tabs.push({ id: 'MOD', nombre: 'Modula' });
     Object.keys(naves).sort(ordenNat).forEach(function (n) { tabs.push({ id: 'N' + n, nombre: 'Nave ' + n }); });
     return tabs;
   }
   function unidadesDeTab(un, tab) {
-    return un.filter(function (u) { return tab === 'MOD' ? u.tipo === 'torre' : (u.tipo !== 'torre' && 'N' + u.nave === tab); })
-      .sort(function (a, b) { return ordenNat(a.tipo === 'torre' ? a.torre : a.pasillo, b.tipo === 'torre' ? b.torre : b.pasillo); });
+    return un.filter(function (u) { return tab === 'PUN' ? u.tipo === 'puntual' : tab === 'MOD' ? u.tipo === 'torre' : (u.tipo === 'pasillo' && 'N' + u.nave === tab); })
+      .sort(function (a, b) { return ordenNat(etq(a).rotulo, etq(b).rotulo); });
+  }
+  function tabDe(u) { return u.tipo === 'puntual' ? 'PUN' : u.tipo === 'torre' ? 'MOD' : 'N' + u.nave; }
+  // cómo se llama una unidad según su tipo: pasillo, torre Modula o lista de un código puntual
+  function etq(u) {
+    var zona = u.zona ? u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '';
+    if (u.tipo === 'torre') return { titulo: 'Torre ' + u.torre, sub: 'Modula', rotulo: String(u.torre), corto: 'la torre ' + u.torre, cierre: 'torre' };
+    if (u.tipo === 'puntual') {
+      var cod = String(u.id || '').replace(/^RC\d+-/, '').replace(/^P-/, '');
+      return { titulo: 'Puntual ' + cod, sub: String(u.nombre || '').split(' · ').slice(1).join(' · ') || 'Puntual', rotulo: cod, corto: 'la lista ' + cod, cierre: 'lista' };
+    }
+    return { titulo: 'Pasillo ' + u.pasillo, sub: 'Nave ' + u.nave + (zona ? ' · ' + zona : ''), rotulo: String(u.pasillo), corto: 'el pasillo ' + u.pasillo, cierre: 'pasillo' };
   }
   function filaUnidad(u, modo, bloqueado) {
-    var torre = u.tipo === 'torre', rotulo = u.reconteo ? 'RC' : (torre ? u.torre : u.pasillo);
+    var torre = u.tipo === 'torre', E = etq(u), rotulo = u.reconteo ? 'RC' : E.rotulo;
     var cls = 'u' + (u.mia ? ' mia' : '') + (u.estado === 'Cerrado' || u.estado === 'Ajustado' ? ' cerrado' : '') + (u.estado === 'En conteo' && !u.mia ? ' otro' : '');
-    var det = torre ? (u.udcs + ' UDC · ' + u.filas + ' posiciones') : (u.filas + ' posiciones');
+    var det = torre ? (u.udcs + ' UDC · ' + u.filas + ' posiciones') : u.tipo === 'puntual' ? (E.sub + ' · ' + u.filas + ' ubicaciones') : (u.filas + ' posiciones');
     var sub, acc = '';
     if (u.estado === 'En conteo') sub = '<b>En conteo</b> · ' + esc(u.mia ? 'tú' : u.operador); else sub = esc(det);
     if (u.estado === 'En conteo') det = det + (u.ultimo_movimiento ? ' · ' + hace(u.ultimo_movimiento) : '');
@@ -193,8 +205,8 @@
       else if (ae === 'sin_tomar') acc = '<div class="acc">' + ver + '<button class="btn peq" data-a="tomarAjuste" data-id="' + uid + '"' + (bloqueado ? ' disabled' : '') + '>Tomar</button></div>';
       else acc = '<div class="acc"><span class="est' + (ae === 'ajustado' ? ' ok' : '') + '">' + (ae === 'ajustado' ? 'Ajustado' : 'Ajusta') + ' · ' + esc(u.ajustador) + '</span>' + ver + '</div>';
     } else { acc = '<span class="est' + (u.estado === 'Pendiente' ? '' : ' ok') + '">' + esc(u.estado) + '</span>'; }
-    return '<li class="' + cls + '"><div class="letra' + (torre ? ' torre' : '') + '" aria-hidden="true">' + esc(rotulo) + '</div>' +
-      '<div class="info"><div class="nom">' + esc((u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (torre ? ('Torre ' + u.torre) : ('Pasillo ' + u.pasillo) + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : ''))) + '</div><div class="det">' + sub + (u.estado === 'En conteo' ? ' · ' + esc(hace(u.ultimo_movimiento)) : '') + '</div></div>' + acc + '</li>';
+    return '<li class="' + cls + '"><div class="letra' + (torre ? ' torre' : '') + (u.tipo === 'puntual' && !u.reconteo ? ' cod' : '') + '" aria-hidden="true">' + esc(rotulo) + '</div>' +
+      '<div class="info"><div class="nom">' + esc((u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (u.tipo === 'pasillo' ? E.titulo + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '') : E.titulo)) + '</div><div class="det">' + sub + (u.estado === 'En conteo' ? ' · ' + esc(hace(u.ultimo_movimiento)) : '') + '</div></div>' + acc + '</li>';
   }
   function vacioToma() {
     return '<div class="vacio"><h2>No hay nada por hacer</h2><p>Todavía no hay una toma de inventario abierta. Cuando el administrador la abra, aparecerá aquí.</p><button class="btn" data-a="recargar">Actualizar</button></div>';
@@ -211,10 +223,10 @@
     if (!tabs.length) return vacioToma();
     if (!S.tab || !tabs.some(function (t) { return t.id === S.tab; })) {
       var mia = un.filter(function (u) { return u.mia; })[0];
-      S.tab = mia ? (mia.tipo === 'torre' ? 'MOD' : 'N' + mia.nave) : tabs[0].id; S.zona = null;
+      S.tab = mia ? tabDe(mia) : tabs[0].id; S.zona = null;
     }
     var lista = unidadesDeTab(un, S.tab), zonas = [];
-    lista.forEach(function (u) { if (u.zona && u.tipo !== 'torre' && zonas.indexOf(u.zona) < 0) zonas.push(u.zona); });
+    lista.forEach(function (u) { if (u.zona && u.tipo === 'pasillo' && zonas.indexOf(u.zona) < 0) zonas.push(u.zona); });
     if (zonas.length > 1) { if (!S.zona || zonas.indexOf(S.zona) < 0) S.zona = zonas[0]; lista = lista.filter(function (u) { return u.zona === S.zona; }); }
     var miUnidad = un.filter(function (u) { return u.mia; })[0], bloqueado = modo === 'contador' && !!miUnidad;
     var miAjuste = modo === 'ajuste' ? un.filter(function (u) { return u.ajustador === S.ses.usuario && u.ajuste_estado === 'en_ajuste'; })[0] : null;
@@ -322,8 +334,8 @@
   }
   function vistaAjuste() {
     var d = AJ.datos, u = d && d.unidad, cuerpo;
-    var titulo = u ? (u.tipo === 'torre' ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo) : 'Ajustes';
-    var sub = u ? (u.tipo === 'torre' ? 'Modula' : 'Nave ' + u.nave + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : '';
+    var titulo = u ? etq(u).titulo : 'Ajustes';
+    var sub = u ? etq(u).sub : '';
     if (AJ.err && !d) cuerpo = '<div class="vacio"><h2>No se pudo cargar</h2><p>' + esc(AJ.err) + '</p><button class="btn rel" data-a="ajrecargar">Reintentar</button></div>';
     else if (!d) cuerpo = cargando(); else cuerpo = ajusteCuerpo(d);
     return '<main class="pantalla">' + cabecera(titulo + ' · Ajustes', sub + (sub ? ' · ' : '') + S.ses.usuario, false, true) + '<div class="cuerpo">' + cuerpo + '</div></main>';
@@ -452,7 +464,7 @@
     hojaDe(wb, 'Unidades', [['ID toma', 18], ['Unidad', 24], ['Tipo', 9], ['Zona', 12], ['Nave', 7], ['Pasillo / Torre', 14], ['Estado', 12], ['Contador', 13], ['Tomada', 20], ['Cerrada por', 13], ['Cerrada', 20], ['Minutos', 9],
       ['Posiciones', 10], ['Contadas', 10], ['Versiones', 10], ['Reconteo de', 14], ['N.º pedido', 9], ['Pedido por', 13], ['Pedido el', 20], ['Último movimiento', 20], ['Ajustador', 13], ['Ajuste tomado', 20], ['Ajuste terminado', 20], ['Minutos de ajuste', 10]], d.unidades, function (u) {
         var torre = u.torre !== null && u.torre !== undefined;
-        return [toma.id, u.nombre, u.tipo, u.zona || '', torre ? '' : u.nave, torre ? 'Torre ' + u.torre : u.pasillo, u.estado, u.operador || '', horaExcel(u.tomado_en), u.cerrado_por || '', horaExcel(u.cerrado_en),
+        return [toma.id, u.nombre, u.tipo, u.zona || '', torre || u.tipo === 'puntual' ? '' : u.nave, torre ? 'Torre ' + u.torre : u.tipo === 'puntual' ? etq(u).rotulo : u.pasillo, u.estado, u.operador || '', horaExcel(u.tomado_en), u.cerrado_por || '', horaExcel(u.cerrado_en),
           u.minutos === null || u.minutos === undefined ? null : u.minutos, u.posiciones, u.contadas, u.versiones, u.reconteo_de || '', u.pedido_n === null || u.pedido_n === undefined ? null : u.pedido_n, u.pedido_por || '', horaExcel(u.pedido_en), horaExcel(u.ultimo_movimiento),
           u.ajustador || '', horaExcel(u.ajuste_tomado_en), horaExcel(u.ajuste_terminado_en), u.ajuste_minutos === null || u.ajuste_minutos === undefined ? null : u.ajuste_minutos]; });
     hojaDe(wb, 'Eventos', [['ID toma', 18], ['Hora', 20], ['Usuario', 14], ['Acción', 24], ['Detalle', 70]], d.eventos, function (e) { return [toma.id, horaExcel(e.ts), e.usuario || '', e.accion, e.detalle || '']; });
@@ -512,13 +524,16 @@
   function adminCarga() {
     var d = S.datos, abierta = d && d.toma_activa, inf = S.informe, h = '<div class="form">';
     if (!d) return cargando();
+    var pun = S.modoCarga === 'puntual';
+    h += '<div class="seg" role="group" style="margin:0 0 12px"><button data-a="modoCarga" data-id="normal" aria-pressed="' + !pun + '">Toma general</button><button data-a="modoCarga" data-id="puntual" aria-pressed="' + pun + '">Puntuales (por código)</button></div>';
+    if (pun) h += '<div class="aviso">' + (abierta ? 'Para sumar más códigos a la toma abierta: pega las filas del WMS, valida y toca <b>Agregar a la toma</b>. ' : 'Pega las filas del WMS de los códigos que buscaron (todas sus ubicaciones). ') + 'Se crea <b>una lista por código</b>; una sola persona cuenta todas sus ubicaciones. Si no hay toma abierta, abrirla crea una toma solo de puntuales.</div>';
     if (abierta) {
       h += '<div class="ok"><b>Hay una toma abierta</b> con ' + d.unidades.length + ' unidades.</div>' +
         '<div class="aviso">Para sumar más naves o pasillos: pega los datos (solo lo nuevo, o todo de nuevo), valida y toca <b>Agregar a la toma</b>. Lo que ya se está contando no se toca.</div>';
     } else {
       h += '<div class="aviso">En Excel, copia las celdas de tus datos <b>con la fila de títulos</b> y pégalas abajo. Luego valida y abre la toma.</div>';
     }
-    h += cajaPegado('pegado', 'Datos del sistema', 'Pega aquí las celdas copiadas de Excel', S.pegado);
+    h += cajaPegado('pegado', pun ? 'Filas de los códigos puntuales' : 'Datos del sistema', 'Pega aquí las celdas copiadas de Excel', S.pegado);
     h += cajaPegado('pegadoBarras', 'Catálogo de códigos de barra (opcional)', 'ARTICULO, CODIGO DE BARRA UND, CODIGO DE BARRA CAJA', S.pegadoBarras);
     if (!abierta) h += '<div class="campo"><label for="nombreToma">Nombre de la toma (opcional)</label><input id="nombreToma" value="' + esc(S.nombreToma) + '" maxlength="60" autocomplete="off"></div>';
     h += '<button class="btn amb ancho" data-a="validar"' + (S.ocupado || !S.pegado ? ' disabled' : '') + '>' + (S.ocupado ? 'Validando…' : 'Validar datos') + '</button>';
@@ -527,7 +542,7 @@
       '<p class="pie" style="padding:0 0 8px"><b>Agregar</b> suma los códigos nuevos y completa los que faltaban; no borra nada. <b>Reemplazar</b> deja solo lo pegado aquí.</p>';
     if (inf) {
       h += '<div class="tarjetas" style="padding:0"><div class="tj"><small>Filas leídas</small><b>' + inf.informe.filas_leidas + '</b></div><div class="tj"><small>Unidades</small><b>' + inf.informe.unidades_conteo + '</b></div>' +
-        '<div class="tj"><small>Pasillos</small><b>' + inf.informe.pasillos + '</b></div><div class="tj"><small>Torres Modula</small><b>' + inf.informe.torres + '</b></div></div>';
+        (inf.informe.puntuales ? '<div class="tj"><small>Listas por código</small><b>' + inf.informe.puntuales + '</b></div>' : '<div class="tj"><small>Pasillos</small><b>' + inf.informe.pasillos + '</b></div><div class="tj"><small>Torres Modula</small><b>' + inf.informe.torres + '</b></div>') + '</div>';
       var ne = inf.informe.total_errores != null ? inf.informe.total_errores : inf.informe.errores.length;
       if (ne) {
         h += '<div class="err"><b>' + ne + ' error(es) que corregir:</b><ul style="margin:8px 0 0;padding-left:18px">' +
@@ -585,6 +600,13 @@
   // pantalla «En vivo» (maqueta 53): lo último que contó cada persona junto al stock del sistema, solo para el administrador.
   // Sirve para ver al momento quién contó distinto y dónde, e ir a decirle que valide. El contador nunca ve esta pantalla ni el stock.
   var VIVO_ESTADOS = { conforme: ['Conforme', 'ver'], sobrante: ['Sobrante', 'rojo'], faltante: ['Faltante', 'nar'] };
+  // de dónde es una posición: «N3-B-MIN» = nave 3, pasillo B, minorista; «MOD-2» = torre 2 de Modula
+  function vivoLugar(l) {
+    var m = /^N(\d+)-([A-Z0-9]+)-([A-Z]+)/.exec(l || ''), t = /^MOD-(\d+)/.exec(l || '');
+    if (m) return { nave: 'N' + m[1], naveTxt: 'Nave ' + m[1], pasTxt: 'Nave ' + m[1] + ' · Pasillo ' + m[2] + (m[3] === 'MIN' ? ' · Minorista' : m[3] === 'MAY' ? ' · Mayorista' : '') };
+    if (t) return { nave: 'MOD', naveTxt: 'Modula', pasTxt: 'Modula · Torre ' + t[1] };
+    return { nave: 'OTRO', naveTxt: 'Otro', pasTxt: l || 'Otro' };
+  }
   function vivoDif(f) { return (f.contado || 0) - (f.stock || 0); }
   function vivoEstado(f) { var d = vivoDif(f); return d === 0 ? 'conforme' : d > 0 ? 'sobrante' : 'faltante'; }
   // diferencia grande: 20 unidades o más y, si había stock, la mitad o más de ese stock
@@ -592,10 +614,13 @@
   function adminEnVivo() {
     var d = S.vivo; if (!d) return S.errCarga ? '<div class="vacio"><h2>No se pudo cargar</h2><p>' + esc(S.errCarga) + '</p><button class="btn rel" data-a="recargar">Reintentar</button></div>' : cargando();
     if (!d.toma_activa) return '<div class="vacio"><h2>No hay una toma abierta</h2><p>Cuando abras una, aquí verás lo que se va contando.</p></div>';
-    var fi = S.vivoFiltro || 'todos', ct = S.vivoCont || '', gr = 0;
-    var cont = {}; d.filas.forEach(function (f) { cont[f.contador] = 1; if (vivoGrande(f)) gr++; });
+    var fi = S.vivoFiltro || 'todos', ct = S.vivoCont || '', gr = 0, nv = S.vivoNave || '', ps = S.vivoPas || '';
+    var cont = {}, naves = {}, pasillos = {};
+    d.filas.forEach(function (f) { cont[f.contador] = 1; if (vivoGrande(f)) gr++; var l = vivoLugar(f.lugar); naves[l.nave] = l.naveTxt; if (!nv || l.nave === nv) pasillos[f.lugar] = l.pasTxt; });
     var vis = d.filas.filter(function (f) {
       if (ct && f.contador !== ct) return false;
+      if (nv && vivoLugar(f.lugar).nave !== nv) return false;
+      if (ps && f.lugar !== ps) return false;
       if (fi === 'dif') return vivoDif(f) !== 0;
       if (fi === 'sobrante' || fi === 'faltante') return vivoEstado(f) === fi;
       if (fi === 'grande') return vivoGrande(f);
@@ -604,7 +629,11 @@
     var r = d.resumen;
     var chips = [['todos', 'Todos'], ['dif', 'Solo diferencias'], ['faltante', 'Faltante'], ['sobrante', 'Sobrante'], ['grande', '⚠ Diferencia grande (' + gr + ')']].map(function (x) {
       return '<button data-a="vivofiltro" data-id="' + x[0] + '" aria-pressed="' + (fi === x[0]) + '">' + x[1] + '</button>'; }).join('');
-    var sel = '<select class="vivosel" data-vivo="cont" aria-label="Filtrar por contador"><option value="">Todos los contadores</option>' + Object.keys(cont).sort().map(function (n) { return '<option value="' + esc(n) + '"' + (n === ct ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select>';
+    var opts = function (obj, todos, actual, txt) { return '<option value="">' + todos + '</option>' + Object.keys(obj).sort(ordenNat).map(function (k) { return '<option value="' + esc(k) + '"' + (k === actual ? ' selected' : '') + '>' + esc(txt ? txt(k) : k) + '</option>'; }).join(''); };
+    var sel = '<div class="vsel"><select class="vivosel" data-vivo="cont" aria-label="Filtrar por contador">' + opts(cont, 'Todos los contadores', ct) + '</select>' +
+      '<select class="vivosel" data-vivo="nave" aria-label="Filtrar por nave">' + opts(naves, 'Todas las naves', nv, function (k) { return naves[k]; }) + '</select>' +
+      '<select class="vivosel" data-vivo="pas" aria-label="Filtrar por pasillo">' + opts(pasillos, 'Todos los pasillos', ps, function (k) { return pasillos[k]; }) + '</select>' +
+      '<button class="ibtn" data-a="recargar" aria-label="Actualizar">↻</button></div>';
     var filas = vis.map(function (f) {
       var e = VIVO_ESTADOS[vivoEstado(f)], dif = vivoDif(f), lote = f.lote_real || f.lote || '', vc = f.vcto_real || f.vcto || '';
       return '<tr' + (vivoGrande(f) ? ' class="gr"' : '') + '><td class="mono">' + esc(f.hora) + '</td><td>' + esc(f.contador) + (f.reconteo ? ' <span class="chip pen">reconteo</span>' : '') + '</td><td>' + esc(f.unidad) + '</td><td class="mono">' + esc(f.celda || '') + ' · ' + esc(String(f.udc || '')) + ' · ' + esc(String(f.pos || '')) + '</td>' +
@@ -614,7 +643,7 @@
     }).join('');
     return '<div class="tarjetas cuatro"><div class="tj"><small>Contadas</small><b>' + r.contadas + '</b></div><div class="tj ver"><small>Conformes</small><b>' + r.conformes + '</b></div>' +
       '<div class="tj rojo"><small>Sobrantes</small><b>' + r.sobrantes + '</b></div><div class="tj amb"><small>Faltantes</small><b>' + r.faltantes + '</b></div></div>' +
-      '<div class="ajbar"><div class="seg vseg" role="group">' + chips + '</div>' + sel + '<button class="ibtn" data-a="recargar" aria-label="Actualizar">↻</button></div>' +
+      '<div class="seg vseg" role="group">' + chips + '</div>' + sel +
       '<div class="pie" style="padding:0 14px 8px">Se actualiza sola cada 15 segundos · ' + vis.length + ' de ' + d.filas.length + ' filas' + (d.resumen.contadas > d.filas.length ? ' (las ' + d.filas.length + ' más recientes)' : '') + '</div>' +
       '<div class="ajw"><table class="ajt vivo"><thead><tr><th>Hora</th><th>Contador</th><th>Unidad</th><th>Celda · UDC · POS</th><th>Código</th><th>Descripción</th><th>Lote</th><th>Vcto</th><th class="n">Contado</th><th class="n">Stock</th><th class="n">Dif.</th><th>Estado</th><th class="n">Veces</th></tr></thead><tbody>' +
       (filas || '<tr><td colspan="13" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>';
@@ -822,8 +851,8 @@
   }
   function vistaContar() {
     var d = CT.datos, u = d && d.unidad, torre = u && u.tipo === 'torre';
-    var titulo = u ? (u.reconteo ? 'Reconteo · ' : '') + (torre ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo) : (nombreUnidad(unidadPorId(S.unidadActual)) || 'Conteo');
-    var sub = u ? (torre ? 'Modula' : 'Nave ' + u.nave + (u.zona ? ' · ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : '';
+    var titulo = u ? (u.reconteo ? 'Reconteo · ' : '') + etq(u).titulo : (nombreUnidad(unidadPorId(S.unidadActual)) || 'Conteo');
+    var sub = u ? etq(u).sub : '';
     if (torre && CT.udc) sub = 'UDC ' + CT.udc;
     var cuerpo;
     if (CT.perdida) cuerpo = '<div class="vacio"><h2>' + (/cerrada/.test(CT.perdida) ? 'Esta unidad está cerrada' : 'Esta unidad ya no es tuya') + '</h2><p>' + esc(CT.perdida) + '</p>' + (pendientes().filter(function (e) { return e.unidad === S.unidadActual; }).length ? '<p>Lo que contaste sin enviar queda guardado en este celular. Avisa al administrador.</p>' : '') + '<button class="btn rel" data-a="atras">Volver a la lista</button></div>';
@@ -857,7 +886,7 @@
   }
   function botonCerrar() {
     var u = CT.datos && CT.datos.unidad; if (!u) return '';
-    return '<div class="cierre"><button class="btn rel ancho" data-a="pedirCerrar">Terminar y cerrar ' + (u.tipo === 'torre' ? 'torre' : 'pasillo') + '</button></div>';
+    return '<div class="cierre"><button class="btn rel ancho" data-a="pedirCerrar">Terminar y cerrar ' + etq(u).cierre + '</button></div>';
   }
 
   // ---------- registrar un conteo ----------
@@ -1081,12 +1110,13 @@
     modal('<h3>' + esc(titulo) + '</h3><p>' + esc(texto) + '</p>' + (extra || '') + '<div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="' + accion + '" data-id="' + esc(id || '') + '">' + esc(etiqueta) + '</button></div>');
   }
   function unidadPorId(id) { return (S.datos ? S.datos.unidades : []).filter(function (u) { return u.id === id; })[0]; }
-  function nombreUnidad(u) { return u ? (u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (u.tipo === 'torre' ? 'Torre ' + u.torre : 'Pasillo ' + u.pasillo + ' · Nave ' + u.nave + (u.zona ? ' ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '')) : ''; }
+  function nombreUnidad(u) { return u ? (u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (u.tipo === 'pasillo' ? 'Pasillo ' + u.pasillo + ' · Nave ' + u.nave + (u.zona ? ' ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '') : etq(u).titulo) : ''; }
 
   var ACC = {
     tab: function (b) { S.tab = b.dataset.id; S.zona = null; render(); },
     zona: function (b) { S.zona = b.dataset.id; render(); },
     recargar: function () { if (S.vista === 'contar') { S.errCarga = ''; CT.datos = null; render(); cargarConteo(); return; } toast('Actualizando…'); S.errCarga = ''; render(); Promise.resolve(cargarSegunVista()).then(function () { if (S.online) toast('Lista al día.'); }); },
+    modoCarga: function (b) { if (S.modoCarga === b.dataset.id) return; S.modoCarga = b.dataset.id; S.informe = null; renderConScroll(); },
     vivofiltro: function (b) { S.vivoFiltro = b.dataset.id; renderConScroll(); },
     admtab: function (b) { S.adminTab = b.dataset.id; S.filtroHist = ''; S.errCarga = ''; render(); window.scrollTo(0, 0); cargarSegunVista(); },
     atras: function () {
@@ -1183,7 +1213,7 @@
       var d = AJ.datos; if (!d) return; ocupar(b, 'Preparando…');
       cargarExcelJS().then(function () { return armarExcel(d); }).then(function (buf) {
         var u = d.unidad, hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
-        descargarArchivo(buf, 'Ajustes_' + (u.tipo === 'torre' ? 'Torre' + u.torre : 'Pasillo' + u.pasillo + '_Nave' + u.nave) + '_' + hoy + '.xlsx'); liberarBoton(b);
+        descargarArchivo(buf, 'Ajustes_' + (u.tipo === 'torre' ? 'Torre' + u.torre : u.tipo === 'puntual' ? 'Puntual' + etq(u).rotulo : 'Pasillo' + u.pasillo + '_Nave' + u.nave) + '_' + hoy + '.xlsx'); liberarBoton(b);
       }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el Excel.'); });
     },
     paquete: function (b) {
@@ -1281,7 +1311,7 @@
     },
     pedirCerrar: function () {
       var d = CT.datos, u = d && d.unidad; if (!u) return;
-      var faltan = d.filas.length - contadas(d.filas), nom = u.tipo === 'torre' ? 'la torre ' + u.torre : 'el pasillo ' + u.pasillo;
+      var faltan = d.filas.length - contadas(d.filas), nom = etq(u).corto;
       if (faltan > 0) modal('<h3>Faltan ' + faltan + ' posiciones</h3><p>Si cierras ' + nom + ' ahora, esas posiciones quedan sin contar y ya no podrás cambiar nada. Solo el administrador puede reabrirlo.</p><div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Seguir contando</button><button class="btn pel" data-a="cerrarUnidad" data-f="1">Cerrar igual</button></div>');
       else modal('<h3>¿Cerrar ' + nom + '?</h3><p>Contaste todas las posiciones. Después de cerrar ya no podrás cambiarlas; solo el administrador puede reabrirlo.</p><div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="cerrarUnidad" data-f="0">Cerrar</button></div>');
     },
@@ -1363,7 +1393,7 @@
     validar: function () {
       if (!S.pegado) return toast('Primero pega los datos.');
       S.ocupado = true; S.informe = null; render();
-      api('validarDatos', { texto: S.pegado, barras: S.pegadoBarras }).then(function (r) {
+      api('validarDatos', { texto: S.pegado, barras: S.pegadoBarras, modo: S.modoCarga }).then(function (r) {
         S.ocupado = false;
         if (r.ok === false && !r.informe) { toast(r.mensaje || 'No se pudo validar.'); } else S.informe = r;
         render();
@@ -1374,7 +1404,7 @@
     },
     abrir: function (b) {
       ocupar(b, 'Abriendo…');
-      api('abrirToma', { texto: S.pegado, barras: S.pegadoBarras, nombre: S.nombreToma }).then(function (r) {
+      api('abrirToma', { texto: S.pegado, barras: S.pegadoBarras, nombre: S.nombreToma, modo: S.modoCarga }).then(function (r) {
         if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje); }
         cerrarModal(); S.informe = null; S.pegado = ''; S.pegadoBarras = ''; S.nombreToma = ''; toast('Toma abierta: ' + r.unidades + ' unidades.'); S.adminTab = 'avance'; S.datos = null; render(); cargarUnidades();
       });
@@ -1385,7 +1415,7 @@
     },
     agregar: function (b) {
       ocupar(b, 'Agregando…');
-      api('agregarAToma', { texto: S.pegado, barras: S.pegadoBarras }).then(function (r) {
+      api('agregarAToma', { texto: S.pegado, barras: S.pegadoBarras, modo: S.modoCarga }).then(function (r) {
         if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje); }
         cerrarModal(); S.informe = null; S.pegado = ''; S.pegadoBarras = ''; toast(r.sin_cambios ? 'No había nada nuevo.' : 'Agregadas ' + r.nuevas + ' unidades' + (r.actualizadas ? ' y actualizadas ' + r.actualizadas : '') + '.'); S.adminTab = 'avance'; S.datos = null; render(); cargarUnidades(); cargarSegunVista();
       });
@@ -1461,7 +1491,13 @@
     if (i.id === 'rk') { var d = document.getElementById('rdesc'); if (d) d.innerHTML = descReg(i.value.trim().toUpperCase()); }
     if (i.id === 'rv') { var w = document.getElementById('robsw'); if (w) w.hidden = !vencCorto(i.value); }
   });
-  document.addEventListener('change', function (e) { var i = e.target; if (i && i.matches && i.matches('select[data-vivo="cont"]')) { S.vivoCont = i.value; renderConScroll(); } });
+  document.addEventListener('change', function (e) {
+    var i = e.target; if (!i || !i.matches || !i.matches('select[data-vivo]')) return;
+    if (i.dataset.vivo === 'cont') S.vivoCont = i.value;
+    else if (i.dataset.vivo === 'nave') { S.vivoNave = i.value; S.vivoPas = ''; }   // al cambiar de nave el pasillo elegido ya no vale
+    else S.vivoPas = i.value;
+    renderConScroll();
+  });
   // refresco de «En vivo» cada 15 s (solo con la pantalla visible y sin ventanas abiertas)
   setInterval(function () { if (!document.hidden && S.ses && S.ses.rol === 'administrador' && S.vista === 'home' && S.adminTab === 'vivo' && $capa.className !== 'on' && !S.ocupado) cargarSegunVista(true); }, 15000);
   // pantalla del ajustador: casillas de reconteo, estado y observación, y fila elegida
