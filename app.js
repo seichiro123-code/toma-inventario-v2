@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.13';
+  var CFG = window.CONFIG, VERSION = 'F4.14';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -609,8 +609,8 @@
   }
   function vivoDif(f) { return (f.contado || 0) - (f.stock || 0); }
   function vivoEstado(f) { var d = vivoDif(f); return d === 0 ? 'conforme' : d > 0 ? 'sobrante' : 'faltante'; }
-  // diferencia grande: 20 unidades o más y, si había stock, la mitad o más de ese stock
-  function vivoGrande(f) { var d = Math.abs(vivoDif(f)); return d >= 20 && (!f.stock || d >= f.stock * 0.5); }
+  // diferencia grande (⚠): 20 unidades o más, o la mitad del stock o más con al menos 5 unidades de diferencia (así 1 contra 0 no es ruido)
+  function vivoGrande(f) { var d = Math.abs(vivoDif(f)); return d >= 20 || (d >= 5 && d >= (f.stock || 0) * 0.5); }
   function adminEnVivo() {
     var d = S.vivo; if (!d) return S.errCarga ? '<div class="vacio"><h2>No se pudo cargar</h2><p>' + esc(S.errCarga) + '</p><button class="btn rel" data-a="recargar">Reintentar</button></div>' : cargando();
     if (!d.toma_activa) return '<div class="vacio"><h2>No hay una toma abierta</h2><p>Cuando abras una, aquí verás lo que se va contando.</p></div>';
