@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.14';
+  var CFG = window.CONFIG, VERSION = 'F4.15';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -96,7 +96,7 @@
     if (S.ses.rol === 'administrador') {
       if (S.adminTab === 'usuarios') return api('listarUsuarios').then(function (r) { if (r.ok) { S.errCarga = ''; S.usuarios = r.usuarios; renderConScroll(); } else if (!S.usuarios) { S.errCarga = r.mensaje; render(); } else toast(r.mensaje); });
       if (S.adminTab === 'historial') return buscarHistorial();
-      if (S.adminTab === 'vivo') return api('enVivo').then(function (r) { if (r.ok) { S.errCarga = ''; S.vivo = r; renderConScroll(); } else if (!S.vivo) { S.errCarga = r.mensaje; render(); } });
+      if (S.adminTab === 'vivo') return api('enVivo').then(function (r) { if (r.ok) { var igual = !!S.vivo && !S.errCarga && JSON.stringify(r) === JSON.stringify(S.vivo); S.errCarga = ''; S.vivo = r; if (!igual || !silencioso) renderConScroll(); } else if (!S.vivo) { S.errCarga = r.mensaje; render(); } });
       if (S.adminTab === 'avance') api('avance').then(function (r) { if (r.ok && r.toma_activa) { S.av = r; renderConScroll(); } });
       if (S.adminTab === 'carga') api('listarTomas').then(function (r) { if (r.ok && JSON.stringify(r.tomas) !== JSON.stringify(S.tomas)) { S.tomas = r.tomas; renderConScroll(); } });
     }
@@ -645,7 +645,7 @@
       '<div class="tj rojo"><small>Sobrantes</small><b>' + r.sobrantes + '</b></div><div class="tj amb"><small>Faltantes</small><b>' + r.faltantes + '</b></div></div>' +
       '<div class="seg vseg" role="group">' + chips + '</div>' + sel +
       '<div class="pie" style="padding:0 14px 8px">Se actualiza sola cada 15 segundos · ' + vis.length + ' de ' + d.filas.length + ' filas' + (d.resumen.contadas > d.filas.length ? ' (las ' + d.filas.length + ' más recientes)' : '') + '</div>' +
-      '<div class="ajw"><table class="ajt vivo"><thead><tr><th>Hora</th><th>Contador</th><th>Unidad</th><th>Celda · UDC · POS</th><th>Código</th><th>Descripción</th><th>Lote</th><th>Vcto</th><th class="n">Contado</th><th class="n">Stock</th><th class="n">Dif.</th><th>Estado</th><th class="n">Veces</th></tr></thead><tbody>' +
+      '<div class="ajw vivow"><table class="ajt vivo"><thead><tr><th>Hora</th><th>Contador</th><th>Unidad</th><th>Celda · UDC · POS</th><th>Código</th><th>Descripción</th><th>Lote</th><th>Vcto</th><th class="n">Contado</th><th class="n">Stock</th><th class="n">Dif.</th><th>Estado</th><th class="n">Veces</th></tr></thead><tbody>' +
       (filas || '<tr><td colspan="13" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>';
   }
   function vistaAdmin() {
@@ -1094,13 +1094,18 @@
     else if (S.ses.rol === 'contador') h = vistaContador();
     else if (S.ses.rol === 'ajustador') h = vistaAjustador();
     else h = '<main class="pantalla"><div class="vacio"><h2>Rol no reconocido</h2><p>Avisa al administrador.</p><button class="btn" data-a="salir">Cerrar sesión</button></div></main>';
-    $app.innerHTML = h; $app.classList.toggle('ancho', S.vista === 'ajuste');   // la tabla del ajustador usa todo el ancho de la pantalla
+    $app.innerHTML = h;
+    // la tabla del ajustador y la de «En vivo» del administrador usan todo el ancho de la pantalla
+    $app.classList.toggle('ancho', S.vista === 'ajuste' || (!!S.ses && S.ses.rol === 'administrador' && S.vista === 'home' && S.adminTab === 'vivo'));
   }
   function renderConScroll() {
     if (S.vista === 'contar') { pintarChip(); return; }
-    var y = window.scrollY, a = document.activeElement, enFiltro = a && a.name === 'q', v = enFiltro ? a.value : null;
+    var y = window.scrollY, a = document.activeElement, enFiltro = a && a.name === 'q';
     if (enFiltro) return;                         // no se redibuja mientras escribe
+    if (a && a.tagName === 'SELECT' && $app.contains(a)) return;   // ni con una lista desplegable abierta
+    var w = $app.querySelector('.ajw'), wt = w ? w.scrollTop : 0, wl = w ? w.scrollLeft : 0;   // lugar donde estaba mirando la tabla
     render(); window.scrollTo(0, y);
+    var n = $app.querySelector('.ajw'); if (n) { n.scrollTop = wt; n.scrollLeft = wl; }
   }
 
   // ---------- acciones ----------
@@ -1115,7 +1120,7 @@
   var ACC = {
     tab: function (b) { S.tab = b.dataset.id; S.zona = null; render(); },
     zona: function (b) { S.zona = b.dataset.id; render(); },
-    recargar: function () { if (S.vista === 'contar') { S.errCarga = ''; CT.datos = null; render(); cargarConteo(); return; } toast('Actualizando…'); S.errCarga = ''; render(); Promise.resolve(cargarSegunVista()).then(function () { if (S.online) toast('Lista al día.'); }); },
+    recargar: function () { if (S.vista === 'contar') { S.errCarga = ''; CT.datos = null; render(); cargarConteo(); return; } toast('Actualizando…'); S.errCarga = ''; renderConScroll(); Promise.resolve(cargarSegunVista()).then(function () { if (S.online) toast('Lista al día.'); }); },
     modoCarga: function (b) { if (S.modoCarga === b.dataset.id) return; S.modoCarga = b.dataset.id; S.informe = null; renderConScroll(); },
     vivofiltro: function (b) { S.vivoFiltro = b.dataset.id; renderConScroll(); },
     admtab: function (b) { S.adminTab = b.dataset.id; S.filtroHist = ''; S.errCarga = ''; render(); window.scrollTo(0, 0); cargarSegunVista(); },
