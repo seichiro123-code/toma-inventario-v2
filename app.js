@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.16';
+  var CFG = window.CONFIG, VERSION = 'F4.17';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -310,7 +310,11 @@
     // Solo se muestran los pedidos que faltan (pendientes o en conteo); los completos se esconden y se ven con el interruptor.
     var completos = d.pedidos.filter(function (p) { return p.estado === 'Cerrado'; }).length;
     var pe = d.pedidos.filter(function (p) { return AJ.verCompletos || p.estado !== 'Cerrado'; }).map(function (p) { return '<div class="ped">RC-' + p.n + ' · ' + p.posiciones + ' posición(es) · <b>' + (p.estado === 'Cerrado' ? 'Completo' : esc(p.estado)) + '</b>' + (p.contador ? ' · ' + esc(p.contador) : '') + '</div>'; }).join('');
-    return '<div>' + (!ed ? 'Solo lectura: este pasillo no está a tu nombre.' : n ? n + ' posición(es) marcada(s) con la casilla Recontar.' : 'Marca con la casilla las posiciones que no te dan seguridad.') + '</div>' +
+    var u = d.unidad, solo = u.estado !== 'Cerrado'
+      ? 'Todavía no está cerrado' + (u.estado === 'En conteo' && u.operador ? ': lo está contando ' + esc(u.operador) : '') + '. Cuando el contador lo cierre y lo tomes, podrás pedir reconteos.'
+      : !u.ajustador ? 'Toma este pasillo para pedir reconteos.'
+      : 'Solo lectura: este pasillo ' + (u.ajuste_terminado_en ? 'ya está ajustado' : 'lo ajusta ' + esc(u.ajustador)) + '.';
+    return '<div>' + (!ed ? solo : n ? n + ' posición(es) marcada(s) con la casilla Recontar.' : 'Marca con la casilla las posiciones que no te dan seguridad.') + '</div>' +
       '<button class="btn rel" data-a="enviarReconteo"' + (n && ed ? '' : ' disabled') + '>' + (n ? 'Enviar ' + n + ' a reconteo' : 'Enviar a reconteo') + '</button>' +
       (d.pedidos.length ? '<div class="sec" style="padding:10px 0 4px">Pedidos enviados</div>' + (pe || '<div class="ped">No hay pedidos pendientes.</div>') +
         (completos ? '<label class="ped" style="display:flex;gap:8px;align-items:center;margin-top:6px"><input type="checkbox" data-vc' + (AJ.verCompletos ? ' checked' : '') + '> Ver también los completos (' + completos + ')</label>' : '') : '');
@@ -632,12 +636,12 @@
       h += '<div class="aviso">En Excel, copia las celdas de tus datos <b>con la fila de títulos</b> y pégalas abajo. Luego valida y abre la toma.</div>';
     }
     h += cajaPegado('pegado', pun ? 'Filas de los códigos puntuales' : 'Datos del sistema', 'Pega aquí las celdas copiadas de Excel', S.pegado);
-    h += cajaPegado('pegadoBarras', 'Catálogo de códigos de barra (opcional)', 'ARTICULO, CODIGO DE BARRA UND, CODIGO DE BARRA CAJA', S.pegadoBarras);
+    h += cajaPegado('pegadoBarras', 'Catálogo de códigos de barra (opcional)', 'CODIGO, DESCRIPCION, CODIGO DE BARRA UNIDAD, CODIGO DE BARRA CAJA (con la fila de títulos)', S.pegadoBarras);
     if (!abierta) h += '<div class="campo"><label for="nombreToma">Nombre de la toma (opcional)</label><input id="nombreToma" value="' + esc(S.nombreToma) + '" maxlength="60" autocomplete="off"></div>';
     h += '<button class="btn amb ancho" data-a="validar"' + (S.ocupado || !S.pegado ? ' disabled' : '') + '>' + (S.ocupado ? 'Validando…' : 'Validar datos') + '</button>';
     if (S.pegadoBarras) h += '<button class="btn amb ancho" data-a="agregarCatalogo">Agregar al catálogo</button>' +
       '<button class="btn gr ancho" data-a="pedirReemplazarCatalogo">Reemplazar todo el catálogo</button>' +
-      '<p class="pie" style="padding:0 0 8px"><b>Agregar</b> suma los códigos nuevos y completa los que faltaban; no borra nada. <b>Reemplazar</b> deja solo lo pegado aquí.</p>';
+      '<p class="pie" style="padding:0 0 8px"><b>Agregar</b> suma los códigos nuevos y completa o actualiza la descripción y las barras de los que vuelvas a pegar; lo que dejes vacío no borra lo guardado. <b>Reemplazar</b> deja solo lo pegado aquí.</p>';
     if (inf) {
       h += '<div class="tarjetas" style="padding:0"><div class="tj"><small>Filas leídas</small><b>' + inf.informe.filas_leidas + '</b></div><div class="tj"><small>Unidades</small><b>' + inf.informe.unidades_conteo + '</b></div>' +
         (inf.informe.puntuales ? '<div class="tj"><small>Listas por código</small><b>' + inf.informe.puntuales + '</b></div>' : '<div class="tj"><small>Pasillos</small><b>' + inf.informe.pasillos + '</b></div><div class="tj"><small>Torres Modula</small><b>' + inf.informe.torres + '</b></div>') + '</div>';
