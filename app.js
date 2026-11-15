@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.17';
+  var CFG = window.CONFIG, VERSION = 'F4.18';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -262,6 +262,8 @@
   function aEstado(f) { return aMarca(f) || (aConforme(f) ? 'Conforme' : ''); }
   function aFaltan(d) { return d.filas.filter(function (f) { return aMuestra(f) && aDif(f) && !aMarca(f); }).length; }
   function aEditable(d) { var u = d.unidad; return u.estado === 'Cerrado' && u.ajustador === S.ses.usuario && !u.ajuste_terminado_en; }
+  // Decisión 61: producto que el contador registró en una posición vacía; lo corrige quien ajusta el pasillo (o el administrador) mientras la toma esté abierta
+  function aPuedeCorregir(d, f) { return d.unidad.estado === 'Cerrado' && !!f.codigo_reg && !aEnRecon(f) && (S.ses.rol === 'administrador' || aEditable(d)); }
   function aCod(f) { return f.codigo || f.codigo_reg || ''; }
   function aLote(f) { return f.codigo ? f.lote : (f.lote_reg || ''); }
   function aVcto(f) { return f.codigo ? f.vcto : f.vcto_reg; }
@@ -295,6 +297,7 @@
     else x = 'Los conteos no coinciden entre sí ni con el sistema. Decide tú o pide otro reconteo.';
     if (f.lote_real || f.vcto_real) x += ' El contador anotó un lote o vencimiento distinto (Lote real ' + (f.lote_real || '—') + ' · Vcto real ' + (f.vcto_real ? fmtVcto(f.vcto_real) : '—') + ').';
     if (f.obs_contador) x += ' Observación del contador: ' + f.obs_contador + '.';
+    if (f.corregido_por) x += ' ' + (f.codigo_reg ? 'Corregido' : 'Anulado') + ' por ' + f.corregido_por + ': ' + (f.motivo_correccion || '') + '.';
     return x;
   }
   function ajDetalle(d) {
@@ -303,7 +306,8 @@
     var rs = f.reconteos.map(function (r) {
       return '<div><small>Reconteo ' + r.n + ' · ' + (r.cantidad === null ? (r.estado === 'En conteo' ? 'se está contando' : 'pendiente') : esc(r.usuario)) + '</small><b>' + (r.cantidad === null ? '—' : r.cantidad) + '</b></div>';
     }).join('');
-    return '<b>' + esc(aCod(f)) + ' · ' + esc(f.descripcion || '') + '</b><div class="ajg"><div><small>Sistema</small><b>' + aCant(f.sistema) + '</b></div><div><small>1.er conteo' + (f.contado_por ? ' · ' + esc(f.contado_por) : '') + '</small><b>' + (f.contado === null ? '—' : f.contado) + '</b></div>' + rs + '</div><div class="lect">' + esc(aLectura(f)) + '</div>';
+    return '<b>' + esc(aCod(f)) + ' · ' + esc(f.descripcion || '') + '</b><div class="ajg"><div><small>Sistema</small><b>' + aCant(f.sistema) + '</b></div><div><small>1.er conteo' + (f.contado_por ? ' · ' + esc(f.contado_por) : '') + '</small><b>' + (f.contado === null ? '—' : f.contado) + '</b></div>' + rs + '</div><div class="lect">' + esc(aLectura(f)) + '</div>' +
+      (aPuedeCorregir(d, f) ? '<button class="btn gr peq" data-a="corregirReg" data-id="' + esc(f.id) + '">Anular o corregir registro</button>' : '');
   }
   function ajRecuento(d) {
     var ed = aEditable(d), n = Object.keys(AJ.sel).filter(function (k) { return AJ.sel[k]; }).length;
@@ -1220,6 +1224,15 @@
   function unidadPorId(id) { return (S.datos ? S.datos.unidades : []).filter(function (u) { return u.id === id; })[0]; }
   function nombreUnidad(u) { return u ? (u.reconteo ? 'Reconteo RC-' + u.pedido_n + ' · ' : '') + (u.tipo === 'pasillo' ? 'Pasillo ' + u.pasillo + ' · Nave ' + u.nave + (u.zona ? ' ' + u.zona.charAt(0) + u.zona.slice(1).toLowerCase() : '') : etq(u).titulo) : ''; }
 
+  function enviarCorreccion(b, anular) {
+    var v = function (id) { return ($capa.querySelector('#' + id) || {}).value || ''; };
+    ocupar(b, anular ? 'Anulando…' : 'Guardando…');
+    api('corregirRegistro', { fila: b.dataset.id, anular: anular, codigo: v('ck').trim().toUpperCase(), lote: v('cl').trim(), vcto: v('cv'), cantidad: v('cc').trim(), motivo: v('cm').trim() }).then(function (r) {
+      if (!r.ok) { liberarBoton(b); mostrarError(null, r.mensaje || 'No se pudo guardar.'); return cargarAjuste(true); }
+      cerrarModal(); toast(r.accion === 'anulado' ? 'Registro anulado.' : 'Registro corregido.'); cargarAjuste();
+    });
+  }
+
   var ACC = {
     tab: function (b) { S.tab = b.dataset.id; S.zona = null; render(); },
     zona: function (b) { S.zona = b.dataset.id; render(); },
@@ -1305,6 +1318,19 @@
         cerrarModal(); toast('Ajuste liberado.'); cargarSegunVista();
       });
     },
+    // Decisión 61: anular o corregir un producto registrado por error (el servidor valida todo; aquí solo se muestra su respuesta)
+    corregirReg: function (b) {
+      var f = AJ.datos && AJ.datos.filas.filter(function (x) { return x.id === b.dataset.id; })[0]; if (!f) return;
+      modal('<h3>Anular o corregir registro</h3><p>Posición <b>' + esc(f.pos) + '</b>. <b>' + esc(f.contado_por || 'El contador') + '</b> registró <b>' + esc(f.codigo_reg) + '</b> (cantidad ' + aCant(f.contado) + '). Todo queda en el historial con tu nombre y el motivo.</p>' +
+        '<div class="campo"><label for="ck">Código del artículo</label><input id="ck" autocapitalize="characters" autocomplete="off" spellcheck="false" maxlength="6" value="' + esc(f.codigo_reg) + '"></div>' +
+        '<div class="campo"><label for="cl">Lote <span class="op">· opcional</span></label><input id="cl" autocomplete="off" maxlength="30" value="' + esc(f.lote_reg || '') + '"></div>' +
+        '<div class="campo"><label for="cv">Vencimiento <span class="op">· opcional</span></label><input id="cv" type="date" min="2000-01-01" max="2100-12-31" value="' + esc(f.vcto_reg || '') + '"></div>' +
+        '<div class="campo"><label for="cc">Cantidad (unidades)</label><input id="cc" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="6" value="' + esc(aCant(f.contado)) + '"></div>' +
+        '<div class="campo"><label for="cm">Motivo</label><input id="cm" maxlength="200" autocomplete="off"></div>' +
+        '<div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn gr" data-a="anularRegistro" data-id="' + esc(f.id) + '">Anular registro</button><button class="btn rel" data-a="guardarCorreccion" data-id="' + esc(f.id) + '">Guardar corrección</button></div>', true);
+    },
+    guardarCorreccion: function (b) { enviarCorreccion(b, false); },
+    anularRegistro: function (b) { enviarCorreccion(b, true); },
     ajrecargar: function () { AJ.err = ''; if (!AJ.datos) render(); cargarAjuste(); },
     ajfiltro: function (b) { AJ.filtro = b.dataset.id; renderConScroll(); },
     enviarReconteo: function (b) {
