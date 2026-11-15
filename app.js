@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.15';
+  var CFG = window.CONFIG, VERSION = 'F4.16';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -371,7 +371,41 @@
   }
   function pinta(c, argb, letra) { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb } }; c.font = { color: { argb: letra } }; }
   function cantidad(c, v, s) { if (v === null || v === undefined) return; if (v < s) pinta(c, 'FFF7C1C1', 'FF791F1F'); else if (v > s) pinta(c, 'FFB5D4F4', 'FF0C447C'); }   // rojo: menor · azul: mayor · sin color: igual
-  function armarExcel(d) {
+  // ---------- marca de agua y ID de descarga ----------
+  // Los tres Excel que baja la app (paquete, BASE y el del ajustador) llevan la marca en capas: imagen de fondo, encabezado y pie al imprimir, propiedades del archivo y,
+  // en la BASE, la columna Origen de cada fila. Sirve para saber de dónde viene un archivo si lo reenvían; no es una protección (el fondo se quita y no viaja al copiar celdas).
+  var MARCA = { grande: 'BenitoStock', chica: 'generado con la app' };
+  function ahoraLima() { return new Date(Date.now() - 5 * 3600000); }       // Lima es UTC-5 todo el año: la fecha se lee con los métodos UTC de este objeto
+  function idDescarga() {                                                    // D-AAAAMMDD-HHMM-XXXX: hora de Lima + 4 caracteres al azar (sin 0, O, 1, I)
+    var d = ahoraLima().toISOString(), ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r = new Uint8Array(4), s = '', i;
+    try { crypto.getRandomValues(r); } catch (e) { for (i = 0; i < 4; i++) r[i] = Math.floor(Math.random() * 256); }
+    for (i = 0; i < 4; i++) s += ABC.charAt(r[i] % 32);
+    return 'D-' + d.slice(0, 10).replace(/-/g, '') + '-' + d.slice(11, 16).replace(':', '') + '-' + s;
+  }
+  function marcaPng() {                      // tira de fondo: texto gris muy claro en diagonal que Excel repite en mosaico. null si el navegador no puede dibujarla
+    try {
+      var cv = document.createElement('canvas'), x, u; cv.width = 420; cv.height = 260; x = cv.getContext('2d'); if (!x) return null;
+      x.fillStyle = '#ffffff'; x.fillRect(0, 0, 420, 260); x.translate(210, 130); x.rotate(-Math.PI / 7); x.textAlign = 'center'; x.fillStyle = '#e6e6e3';
+      x.font = 'bold 34px Arial'; x.fillText(MARCA.grande, 0, 0); x.font = '15px Arial'; x.fillText(MARCA.chica, 0, 26);
+      u = cv.toDataURL('image/png'); return /^data:image\/png;base64,.{100,}/.test(u) ? u : null;    // un navegador que bloquea el canvas puede dar una imagen vacía: así no se mete en el archivo
+    } catch (e) { return null; }
+  }
+  function marcar(wb, titulo, archivo, id) {  // se llama cuando el libro ya tiene todas sus hojas
+    var png = marcaPng(), img = png ? wb.addImage({ base64: png, extension: 'png' }) : null;
+    var enc = String(titulo).slice(0, 80).replace(/&/g, '&&');   // en el encabezado y pie de Excel «&» abre un código (&P = página): uno de verdad se escribe doble. Se corta ANTES de duplicarlo
+    wb.worksheets.forEach(function (ws) {
+      if (img !== null) ws.addBackgroundImage(img);
+      ws.headerFooter.oddHeader = '&C&"Arial,Bold"BenitoStock · ' + enc;
+      ws.headerFooter.oddFooter = '&L' + archivo + ' · descarga ' + id + '&RPágina &P de &N';
+    });
+    wb.creator = 'BenitoStock ' + VERSION; wb.lastModifiedBy = 'BenitoStock'; wb.company = 'BenitoStock'; wb.title = titulo;
+    wb.description = 'Generado con BenitoStock ' + VERSION + ' · ID de descarga ' + id;
+  }
+  function archivoToma(prefijo, toma) {
+    var nom = String(toma.nombre).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'toma';
+    return prefijo + nom + '_' + ahoraLima().toISOString().slice(0, 10) + '.xlsx';
+  }
+  function armarExcel(d, archivo, idd) {
     var ws, wb = new window.ExcelJS.Workbook(); ws = wb.addWorksheet('Ajustes', { views: [{ state: 'frozen', ySplit: 1 }] });
     var cols = [['Código', 12], ['Descripción', 34], ['UDC', 10], ['Celda', 9], ['POS', 7], ['Lote', 13], ['Vcto', 12], ['Cant. sistema', 13], ['Cant. contada', 13], ['Cant. reconteo', 14], ['Lote real', 13], ['Vcto real', 12], ['Estado', 14], ['Obs', 32], ['CLAVE', 22]];
     encabezado(ws, cols);
@@ -385,6 +419,7 @@
     });
     ws.getColumn(15).hidden = true;                       // CLAVE: identifica la posición; el ajustador no la ve
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 15 } };
+    marcar(wb, 'Ajustes · ' + ((d.unidad && d.unidad.nombre) || ''), archivo, idd);
     return wb.xlsx.writeBuffer();
   }
   // Paquete de análisis de una toma: un Excel con varias hojas, para guardarlo y analizarlo (trazabilidad, tiempos, incidencias).
@@ -420,12 +455,12 @@
     lista.sort(function (x, y) { return x.neto - y.neto || ordenNat(x.cod, y.cod); });       // lo que más falta, primero
     return lista;
   }
-  function armarPaquete(toma, res, filas, d) {
-    var wb = new window.ExcelJS.Workbook(), rs = wb.addWorksheet('Resumen'), hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 16).split('T');
+  function armarPaquete(toma, res, filas, d, archivo, idd) {
+    var wb = new window.ExcelJS.Workbook(), rs = wb.addWorksheet('Resumen'), hoy = ahoraLima().toISOString().slice(0, 16).split('T');
     rs.columns = [{ width: 38 }, { width: 24 }];
     function par(a, b, neg) { var r = rs.addRow([a, b]); if (neg) r.getCell(1).font = { bold: true }; }
     par('Toma', toma.nombre, true); par('ID de la toma', toma.id); par('Estado', toma.estado === 'abierta' ? 'Abierta' : 'Cerrada'); par('Abierta por', toma.abierta_por || ''); par('Abierta el', toma.abierta_en || ''); par('Cerrada el', toma.cerrada_en || '—');
-    par('Paquete bajado el', fmtVcto(hoy[0]) + ' ' + hoy[1]); rs.addRow([]);
+    par('Paquete bajado el', fmtVcto(hoy[0]) + ' ' + hoy[1]); par('ID de descarga', idd); rs.addRow([]);
     par('Posiciones', res.total, true); par('Contadas', res.contadas); par('Sin contar', res.sin_contar); par('Contadas como vacías', res.vacias);
     par('Con menos que el sistema (rojo)', res.menos); par('Con más que el sistema (azul)', res.mas); par('Con lote o vencimiento distinto', res.lote_vcto); par('Reconteos pedidos', res.reconteos);
     if (res.conformes !== undefined) { par('Conformes (cuadran con el sistema)', res.conformes); par('Ajustadas', res.ajustadas); par('No ajustadas', res.no_ajustadas); par('Con diferencia sin revisar', res.sin_revisar); }   // toma archivada con una versión anterior: no trae estas cifras
@@ -440,6 +475,7 @@
     par('Por artículo', 'Falta o sobra por código sumando todas sus ubicaciones. Guarda el paquete de cada toma: un código que falta o sobra toma tras toma es lo que hay que investigar.');
     par('Clave de ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.');
     par('Tiempos', 'Al calcular velocidad ignora pausas de más de 10 minutos entre dos guardados (almuerzo, descanso).');
+    par('Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.');
     par('Confidencial', 'Contiene datos del almacén y de las personas que contaron. Úsalo para mejorar el proceso, no como prueba por sí solo.');
 
     var ws = wb.addWorksheet('Toma', { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -474,7 +510,69 @@
       ['Ubic. con falta', 10], ['Ubic. con sobra', 10], ['Ubic. sin contar', 10], ['Ubic. con reconteo', 10], ['Resultado', 34]], porArticulo(filas), function (a) {
         return [toma.id, a.cod, a.desc, a.ubic, a.sis, a.con, a.neto, a.falt, a.sobr, a.nfalt, a.nsobr, a.sin, a.rec, a.res]; });
     pa.eachRow(function (row, n) { if (n > 1) { var r = row.getCell(14).value; if (r === 'Falta') pinta(row.getCell(14), 'FFF7C1C1', 'FF791F1F'); else if (r === 'Sobra') pinta(row.getCell(14), 'FFB5D4F4', 'FF0C447C'); } });
+    marcar(wb, 'Paquete de ' + toma.nombre, archivo, idd);
     return wb.xlsx.writeBuffer();
+  }
+  // ---------- hoja BASE: todo lo contado de UNA toma, para cargarlo en el dashboard propio ----------
+  // 22 columnas fijas y en este orden (es el contrato con quien la pega en su Excel o su Power BI), una fila por posición, sin nombres de personas ni observaciones libres.
+  // Sale de las mismas filas que la hoja «Toma» del paquete: una prueba compara las dos posición por posición. NO es el paquete: no se registra y no habilita Archivar.
+  var BASE_COLS = ['ID toma', 'Fecha toma', 'Nave', 'Pasillo / Torre', 'UDC', 'Celda', 'POS', 'Código', 'Descripción', 'Lote', 'Vcto', 'Stock sistema', 'Contado', 'Diferencia', 'Reconteo', 'Dif. reconteo', 'Lote real', 'Vcto real', 'Situación', 'Estado ajuste', 'Clave ubicación', 'Origen'];
+  var BASE_ANCHOS = [20, 12, 9, 13, 9, 8, 6, 10, 30, 10, 12, 9, 9, 10, 10, 10, 10, 12, 11, 13, 26, 42];
+  var F_FECHA = 'dd/mm/yyyy';
+  var F_DIF = '[Blue]+0;[Red]-0;0';     // secciones: positivo;negativo;cero. En la del negativo Excel muestra el valor ABSOLUTO, por eso el «-» va escrito a mano. Rojo = menos, azul = más.
+  var BASE_FORMATOS = { 2: F_FECHA, 11: F_FECHA, 14: F_DIF, 16: F_DIF, 18: F_FECHA };
+  function fechaDe(s) {     // «27/10/2026 09:00» (como la entrega el servidor) o «2029-06-18» -> fecha de Excel (medianoche UTC: Excel muestra ese mismo día). null si no se entiende
+    var m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s || '');
+    if (m) return new Date(Date.UTC(+m[3], m[2] - 1, +m[1]));
+    m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); return m ? new Date(Date.UTC(+m[1], m[2] - 1, +m[3])) : null;
+  }
+  function filaBase(toma, f, origen, fecha) {       // todo lo vacío va como null (una celda vacía), no como texto vacío; undefined saltaría la celda y perdería su formato
+    var torre = f.torre !== null && f.torre !== undefined, sin = f.contado === null || f.contado === undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
+    return [toma.id, fecha, torre ? 'Modula' : f.nave ? 'Nave ' + f.nave : null, torre ? 'Torre ' + f.torre : f.pasillo || null, String(f.udc), f.celda || null, f.pos, aCod(f), f.descripcion || '', aLote(f) || null, fechaDe(aVcto(f)),
+      f.sistema, sin ? null : f.contado, sin ? null : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? null : f.reconteo - f.sistema, f.lote_real || null, fechaDe(f.vcto_real),
+      sin ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.estado || null, f.clave || null, origen];
+  }
+  function armarBase(toma, filas, archivo, idd) {
+    var wb = new window.ExcelJS.Workbook(), ws = wb.addWorksheet('BASE', { views: [{ state: 'frozen', ySplit: 1 }], properties: { tabColor: { argb: 'FFFF7A1A' } } });
+    var origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, fecha = fechaDe(toma.abierta_en), h = ws.getRow(1), ley, abierta = toma.estado !== 'cerrada';
+    BASE_COLS.forEach(function (n, i) { var c = ws.getColumn(i + 1); c.width = BASE_ANCHOS[i]; if (BASE_FORMATOS[i + 1]) c.numFmt = BASE_FORMATOS[i + 1]; });   // el formato va en la columna: lo heredan también las celdas vacías
+    BASE_COLS.forEach(function (n, i) { var c = h.getCell(i + 1); c.value = n; c.font = { bold: true, color: { argb: 'FF14161B' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC21A' } }; c.alignment = { wrapText: true, vertical: 'middle' }; });
+    h.height = 30;
+    filas.forEach(function (f) { ws.addRow(filaBase(toma, f, origen, fecha)); });
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BASE_COLS.length } };
+    ley = wb.addWorksheet('LÉEME'); ley.getColumn(1).width = 24; ley.getColumn(2).width = 120;
+    ley.addRow(['BASE de «' + toma.nombre + '»']); ley.getRow(1).font = { bold: true, size: 14 };
+    [['Qué es', 'Todo lo contado de UNA toma: una fila por posición, siempre las mismas 22 columnas en el mismo orden y sin nombres de personas ni observaciones libres.'],
+      ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgala otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
+      ['Cómo usarla', 'Copia las filas de la hoja BASE (sin la fila de títulos) y pégalas debajo de tu propia tabla de datos. La columna «ID toma» dice de qué toma es cada fila y permite detectar una toma pegada dos veces.'],
+      ['Columnas', BASE_COLS.join(' · ')],
+      ['Diferencia', 'Contado − sistema (rojo: menos · azul: más). «Reconteo» y «Dif. reconteo» se llenan solo si esa posición se recontó. Las posiciones «Sin contar» no traen contado ni diferencia.'],
+      ['Situación', 'Contada, Vacía (el contador la marcó vacía) o Sin contar (nadie la contó todavía).'],
+      ['Estado ajuste', 'Conforme (el valor que vale cuadra con el sistema), Ajustado o No ajustado (lo que anotó el ajustador). Vacío si todavía no hay nada que decir.'],
+      ['Celda', 'En un inventario puntual (por código) la celda lleva delante el lugar, por ejemplo «N3-B-MIN · 3BA1», y Nave y Pasillo quedan vacíos. En Modula, Pasillo / Torre dice «Torre 2» y la celda va vacía.'],
+      ['Clave ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.'],
+      ['Origen', 'Marca de la app en cada fila: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
+      ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
+      ['Confidencial', 'Contiene datos del almacén: guárdalo donde corresponde y no lo reenvíes sin permiso.']].forEach(function (p) {
+      var r = ley.addRow(p); r.getCell(1).font = { bold: true }; r.getCell(1).alignment = { vertical: 'top' }; r.getCell(2).alignment = { wrapText: true, vertical: 'top' };
+    });
+    marcar(wb, 'BASE de ' + toma.nombre, archivo, idd);
+    return wb.xlsx.writeBuffer();
+  }
+  // El servidor entrega cada hoja por trozos de hasta 2.000 filas; aquí se juntan. Las usan el paquete y la BASE.
+  function traerPaginas(id, accion, extra, alTerminar) {
+    var filas = [], primero = null;
+    function pagina(desde) {
+      var cuerpo = { id: id, desde: desde, limite: 2000 }; for (var k in extra) cuerpo[k] = extra[k];
+      return api(accion, cuerpo).then(function (r) {
+        if (!r.ok) throw new Error(r.mensaje || 'No se pudo leer la toma.');
+        if (!primero) primero = r; filas = filas.concat(r.filas);
+        if (r.siguiente !== null && r.siguiente !== undefined) return pagina(r.siguiente);
+        if (alTerminar) alTerminar();
+        return { primero: primero, filas: filas };
+      });
+    }
+    return pagina(0);
   }
   // Aviso que se queda en pantalla hasta que la persona lo cierra (un toast de 3 s se pierde si miras otra cosa)
   function avisoPaquete(titulo, archivo, texto, malo) {
@@ -569,13 +667,14 @@
   // Una toma cerrada con el paquete al día se puede archivar: se borra de la nube y queda lo que bajaste.
   function paquetesToma() {
     var t = S.tomas; if (!t || !t.length) return '';
-    return '<div class="sec" style="padding:14px 0 6px">Paquete de análisis</div><p class="pie" style="padding:0 0 8px">Baja todo lo contado, con su historial, las diferencias y los tiempos. Guárdalo: es el registro de la toma. Cuando la toma esté cerrada y el paquete bajado, podrás archivarla (se borra de la nube).</p><ul class="lista" style="margin:0 -14px">' +
+    return '<div class="sec" style="padding:14px 0 6px">Paquete de análisis</div><p class="pie" style="padding:0 0 8px">Baja todo lo contado, con su historial, las diferencias y los tiempos. Guárdalo: es el registro de la toma. Cuando la toma esté cerrada y el paquete bajado, podrás archivarla (se borra de la nube). La BASE es una sola hoja con una fila por posición, para cargarla en tu propio dashboard; no cuenta como paquete.</p><ul class="lista" style="margin:0 -14px">' +
       t.slice(0, 5).map(function (x) {
         var arch = !!x.archivada_en, cerr = x.estado === 'cerrada', pq = x.paquete, det;
         if (arch) det = 'Archivada el ' + fecha(x.archivada_en) + ' · ' + x.filas + ' posiciones';
         else det = (cerr ? 'Cerrada' : 'Abierta') + ' · ' + fecha(x.abierta_en) + ' · ' + x.filas + ' posiciones' + (cerr ? (pq ? (pq.al_dia ? ' · paquete bajado ' + hace(pq.bajado_en) : ' · cambió después de bajar el paquete') : ' · paquete sin bajar') : '');
-        return '<li class="fila"><div class="info"><div class="nom">' + esc(x.nombre) + '</div><div class="det">' + esc(det) + '</div></div><div class="acc">' +
+        return '<li class="fila toma"><div class="info"><div class="nom">' + esc(x.nombre) + '</div><div class="det">' + esc(det) + '</div></div><div class="acc">' +
           (arch ? '' : '<button class="btn peq rel" data-a="paquete" data-id="' + esc(x.id) + '">Descargar paquete</button>' +
+            '<button class="btn peq gr" data-a="base" data-id="' + esc(x.id) + '">Descargar BASE</button>' +
             (cerr ? '<button class="btn peq pel" data-a="pedirArchivar" data-id="' + esc(x.id) + '"' + (pq && pq.al_dia ? '' : ' disabled') + '>Archivar</button>' : '')) + '</div></li>'; }).join('') + '</ul>';
   }
   function recargarTomas() { return api('listarTomas').then(function (r) { if (r.ok) { S.tomas = r.tomas; renderConScroll(); } }); }
@@ -1216,31 +1315,21 @@
     },
     excel: function (b) {
       var d = AJ.datos; if (!d) return; ocupar(b, 'Preparando…');
-      cargarExcelJS().then(function () { return armarExcel(d); }).then(function (buf) {
-        var u = d.unidad, hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
-        descargarArchivo(buf, 'Ajustes_' + (u.tipo === 'torre' ? 'Torre' + u.torre : u.tipo === 'puntual' ? 'Puntual' + etq(u).rotulo : 'Pasillo' + u.pasillo + '_Nave' + u.nave) + '_' + hoy + '.xlsx'); liberarBoton(b);
+      var u = d.unidad, hoy = ahoraLima().toISOString().slice(0, 10), idd = idDescarga();
+      var archivo = 'Ajustes_' + (u.tipo === 'torre' ? 'Torre' + u.torre : u.tipo === 'puntual' ? 'Puntual' + etq(u).rotulo : 'Pasillo' + u.pasillo + '_Nave' + u.nave) + '_' + hoy + '.xlsx';
+      cargarExcelJS().then(function () { return armarExcel(d, archivo, idd); }).then(function (buf) {
+        descargarArchivo(buf, archivo); liberarBoton(b);
       }).catch(function (e) { liberarBoton(b); toast((e && e.message) || 'No se pudo crear el Excel.'); });
     },
     paquete: function (b) {
       var id = b.dataset.id, hechas = 0, TOTAL = 5; ocupar(b, 'Preparando…');
-      function traer(accion, extra) {                 // el servidor entrega cada hoja por trozos de hasta 2.000 filas; aquí se juntan
-        var filas = [], primero = null;
-        function pagina(desde) {
-          var cuerpo = { id: id, desde: desde, limite: 2000 }; for (var k in extra) cuerpo[k] = extra[k];
-          return api(accion, cuerpo).then(function (r) {
-            if (!r.ok) throw new Error(r.mensaje || 'No se pudo preparar el paquete.');
-            if (!primero) primero = r; filas = filas.concat(r.filas);
-            if (r.siguiente !== null && r.siguiente !== undefined) return pagina(r.siguiente);
-            hechas++; b.textContent = 'Preparando… ' + hechas + ' de ' + TOTAL; return { primero: primero, filas: filas };
-          });
-        }
-        return pagina(0);
-      }
-      Promise.all([cargarExcelJS(), traer('excelToma', {}), traer('paqueteToma', { hoja: 'versiones' }), traer('paqueteToma', { hoja: 'unidades' }), traer('paqueteToma', { hoja: 'eventos' }), traer('paqueteToma', { hoja: 'anotaciones' })]).then(function (v) {
+      function hecha() { hechas++; b.textContent = 'Preparando… ' + hechas + ' de ' + TOTAL; }
+      Promise.all([cargarExcelJS(), traerPaginas(id, 'excelToma', {}, hecha), traerPaginas(id, 'paqueteToma', { hoja: 'versiones' }, hecha), traerPaginas(id, 'paqueteToma', { hoja: 'unidades' }, hecha),
+        traerPaginas(id, 'paqueteToma', { hoja: 'eventos' }, hecha), traerPaginas(id, 'paqueteToma', { hoja: 'anotaciones' }, hecha)]).then(function (v) {
         var pos = v[1], toma = pos.primero.toma, cont = { posiciones: pos.filas.length, versiones: v[2].filas.length, unidades: v[3].filas.length, eventos: v[4].filas.length, anotaciones: v[5].filas.length };
-        return armarPaquete(toma, pos.primero.resumen, pos.filas, { versiones: v[2].filas, unidades: v[3].filas, eventos: v[4].filas, anotaciones: v[5].filas }).then(function (buf) {
-          var hoy = new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10), nom = String(toma.nombre).replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || 'toma';
-          var archivo = 'Paquete_' + nom + '_' + hoy + '.xlsx'; descargarArchivo(buf, archivo); liberarBoton(b);
+        var archivo = archivoToma('Paquete_', toma), idd = idDescarga();
+        return armarPaquete(toma, pos.primero.resumen, pos.filas, { versiones: v[2].filas, unidades: v[3].filas, eventos: v[4].filas, anotaciones: v[5].filas }, archivo, idd).then(function (buf) {
+          descargarArchivo(buf, archivo); liberarBoton(b);
           if (toma.estado !== 'cerrada') return avisoPaquete('Paquete descargado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalo otra vez.');
           // toma cerrada: el servidor coteja lo recibido; si coincide, queda anotado y se podrá archivar
           return api('registrarPaquete', { id: id, conteos: cont }).then(function (r) {
@@ -1250,6 +1339,18 @@
           });
         });
       }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el paquete', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
+    },
+    base: function (b) {                          // una sola hoja plana (22 columnas) para el dashboard propio. NO es el paquete: no se registra en el servidor y no habilita Archivar
+      var id = b.dataset.id; ocupar(b, 'Preparando…');
+      Promise.all([cargarExcelJS(), traerPaginas(id, 'excelToma', {}, null)]).then(function (v) {
+        var pos = v[1], toma = pos.primero.toma, archivo = archivoToma('BASE_', toma), idd = idDescarga();
+        return armarBase(toma, pos.filas, archivo, idd).then(function (buf) {
+          descargarArchivo(buf, archivo); liberarBoton(b);
+          avisoPaquete('BASE descargada', archivo, 'Tiene ' + pos.filas.length + ' posiciones, una fila cada una. ' + (toma.estado !== 'cerrada'
+            ? 'La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgala otra vez.'
+            : 'La BASE no reemplaza al paquete: para poder archivar la toma, baja también el paquete.'));
+        });
+      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear la BASE', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
     pedirArchivar: function (b) {
       var t = (S.tomas || []).filter(function (x) { return x.id === b.dataset.id; })[0]; if (!t) return;

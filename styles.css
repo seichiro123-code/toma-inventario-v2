@@ -119,6 +119,9 @@ button{cursor:pointer}
 .fila .nom{font-weight:600;overflow-wrap:anywhere}
 .fila .det{color:var(--tx2);font-size:13px;margin-top:2px;overflow-wrap:anywhere}
 .fila .acc{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.fila.toma{flex-wrap:wrap}   /* la lista de tomas lleva botones largos (paquete, BASE, archivar): el nombre va arriba, a todo el ancho, y los botones debajo */
+.fila.toma .info{flex:1 1 100%}
+.fila.toma .acc{flex:1 1 100%;justify-content:flex-start}
 .pill{display:inline-block;font:600 11px/1 var(--f-txt);padding:4px 7px;border-radius:3px;background:#1b2630;color:var(--tx2);margin-left:6px;vertical-align:middle}
 .pill.ad{background:var(--tinta);color:var(--amb)} .pill.rj{background:var(--rojobg);color:var(--rojo)}
 .pill.am{background:var(--ambbg);color:var(--amb)}
