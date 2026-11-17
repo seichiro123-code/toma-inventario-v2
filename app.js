@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.18';
+  var CFG = window.CONFIG, VERSION = 'F4.19';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -479,6 +479,7 @@
     par('Versiones', 'Cada vez que alguien guardó una cantidad, con la anterior, la hora del celular y la del servidor. Para trazabilidad y tiempos.');
     par('Unidades', 'Cada pasillo, torre o reconteo: quién lo contó, cuándo lo tomó y cuándo lo cerró (minutos); y quién lo ajustó, cuándo lo tomó y cuándo terminó.');
     par('Estado ajuste', 'Conforme = el valor que vale (último reconteo, si no el primer conteo) cuadra con el sistema. Ajustado / No ajustado = lo que anotó el ajustador.');
+    par('Corregido por', 'Quien anuló o corrigió un producto que el contador registró por error, cuándo y por qué. El contador original sigue en «Contó»; la versión anterior y la nueva están en la hoja Versiones.');
     par('Eventos y Anotaciones', 'Lo que pasó en la toma (liberaciones con su motivo, reconteos) y todo lo que anotó el ajustador.');
     par('Por artículo', 'Falta o sobra por código sumando todas sus ubicaciones. Guarda el paquete de cada toma: un código que falta o sobra toma tras toma es lo que hay que investigar.');
     par('Clave de ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.');
@@ -489,22 +490,23 @@
     var ws = wb.addWorksheet('Toma', { views: [{ state: 'frozen', ySplit: 1 }] });
     encabezado(ws, [['Nave', 8], ['Pasillo / Torre', 14], ['UDC', 10], ['Celda', 9], ['POS', 7], ['Código', 12], ['Descripción', 34], ['Lote', 13], ['Vcto', 12], ['Stock sistema', 13], ['Contado', 11], ['Diferencia', 12],
       ['Reconteo', 11], ['Dif. reconteo', 13], ['Lote real', 13], ['Vcto real', 12], ['Situación', 12], ['Contó', 12], ['Hora', 17], ['Reconteo por', 13], ['Estado ajuste', 14], ['Obs ajustador', 30], ['Ajustó', 12], ['Hora ajuste', 17], ['Obs contador', 30],
-      ['Clave ubicación', 26], ['ID toma', 18], ['CLAVE', 22]]);
+      ['Corregido por', 13], ['Hora corrección', 17], ['Motivo corrección', 30], ['Clave ubicación', 26], ['ID toma', 18], ['CLAVE', 22]]);
     filas.forEach(function (f) {
       var torre = f.torre !== null && f.torre !== undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
       var row = ws.addRow([torre ? 'Modula' : f.nave, torre ? 'Torre ' + f.torre : f.pasillo, String(f.udc), f.celda, f.pos, aCod(f), f.descripcion || '', aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema,
         f.contado, f.contado === null ? '' : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? '' : f.reconteo - f.sistema, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '',
-        f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.ajuste_hora || '', f.obs_contador || '', f.clave || '', toma.id, f.id]);
+        f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.ajuste_hora || '', f.obs_contador || '', f.corregido_por || '', f.corregido_en || '', f.motivo_correccion || '', f.clave || '', toma.id, f.id]);
       cantidad(row.getCell(11), f.contado, f.sistema); if (!sinRec) cantidad(row.getCell(13), f.reconteo, f.sistema);
       if (f.lote_real) pinta(row.getCell(15), 'FFFAEEDA', 'FF633806'); if (f.vcto_real) pinta(row.getCell(16), 'FFFAEEDA', 'FF633806');
     });
-    ws.getColumn(28).hidden = true;                       // CLAVE: identifica la posición dentro de la toma (útil para otro sistema); no estorba a la vista
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 28 } };
+    ws.getColumn(31).hidden = true;                       // CLAVE: identifica la posición dentro de la toma (útil para otro sistema); no estorba a la vista
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 31 } };
 
     hojaDe(wb, 'Versiones', [['ID toma', 18], ['Clave ubicación', 26], ['Unidad', 22], ['UDC', 10], ['POS', 7], ['Código', 12], ['Contador', 13], ['Cantidad', 10], ['Cantidad anterior', 11], ['N.º versión', 9], ['Vacía', 8],
-      ['Hora (celular)', 20], ['Hora (servidor)', 20], ['Segundos desde su guardado anterior', 16], ['Lote real', 13], ['Vcto real', 12], ['Obs', 28], ['Es reconteo', 10], ['N.º pedido', 9]], d.versiones, function (v) {
+      ['Hora (celular)', 20], ['Hora (servidor)', 20], ['Segundos desde su guardado anterior', 16], ['Lote real', 13], ['Vcto real', 12], ['Obs', 28], ['Es reconteo', 10], ['N.º pedido', 9], ['Corregido por', 13], ['Hora corrección', 20], ['Motivo corrección', 30]], d.versiones, function (v) {
         return [toma.id, v.clave || '', v.unidad || '', v.udc ? String(v.udc) : '', v.pos || '', v.codigo || '', v.usuario, v.cantidad, v.antes === null || v.antes === undefined ? null : v.antes, v.version, v.vacia ? 'Sí' : 'No',
-          horaExcel(v.hora), horaExcel(v.hora_srv), v.seg === null || v.seg === undefined ? null : v.seg, v.lote_real || '', v.vcto_real ? fmtVcto(v.vcto_real) : '', v.obs || '', v.reconteo ? 'Sí' : 'No', v.pedido_n === null || v.pedido_n === undefined ? null : v.pedido_n]; });
+          horaExcel(v.hora), horaExcel(v.hora_srv), v.seg === null || v.seg === undefined ? null : v.seg, v.lote_real || '', v.vcto_real ? fmtVcto(v.vcto_real) : '', v.obs || '', v.reconteo ? 'Sí' : 'No', v.pedido_n === null || v.pedido_n === undefined ? null : v.pedido_n,
+          v.corregido_por || '', horaExcel(v.corregido_en), v.motivo_correccion || '']; });
     hojaDe(wb, 'Unidades', [['ID toma', 18], ['Unidad', 24], ['Tipo', 9], ['Zona', 12], ['Nave', 7], ['Pasillo / Torre', 14], ['Estado', 12], ['Contador', 13], ['Tomada', 20], ['Cerrada por', 13], ['Cerrada', 20], ['Minutos', 9],
       ['Posiciones', 10], ['Contadas', 10], ['Versiones', 10], ['Reconteo de', 14], ['N.º pedido', 9], ['Pedido por', 13], ['Pedido el', 20], ['Último movimiento', 20], ['Ajustador', 13], ['Ajuste tomado', 20], ['Ajuste terminado', 20], ['Minutos de ajuste', 10]], d.unidades, function (u) {
         var torre = u.torre !== null && u.torre !== undefined;
@@ -522,10 +524,10 @@
     return wb.xlsx.writeBuffer();
   }
   // ---------- hoja BASE: todo lo contado de UNA toma, para cargarlo en el dashboard propio ----------
-  // 22 columnas fijas y en este orden (es el contrato con quien la pega en su Excel o su Power BI), una fila por posición, sin nombres de personas ni observaciones libres.
+  // 24 columnas fijas y en este orden (las 22 primeras no se mueven: hay dashboards que las pegan) (es el contrato con quien la pega en su Excel o su Power BI), una fila por posición, sin nombres de personas ni observaciones libres.
   // Sale de las mismas filas que la hoja «Toma» del paquete: una prueba compara las dos posición por posición. NO es el paquete: no se registra y no habilita Archivar.
-  var BASE_COLS = ['ID toma', 'Fecha toma', 'Nave', 'Pasillo / Torre', 'UDC', 'Celda', 'POS', 'Código', 'Descripción', 'Lote', 'Vcto', 'Stock sistema', 'Contado', 'Diferencia', 'Reconteo', 'Dif. reconteo', 'Lote real', 'Vcto real', 'Situación', 'Estado ajuste', 'Clave ubicación', 'Origen'];
-  var BASE_ANCHOS = [20, 12, 9, 13, 9, 8, 6, 10, 30, 10, 12, 9, 9, 10, 10, 10, 10, 12, 11, 13, 26, 42];
+  var BASE_COLS = ['ID toma', 'Fecha toma', 'Nave', 'Pasillo / Torre', 'UDC', 'Celda', 'POS', 'Código', 'Descripción', 'Lote', 'Vcto', 'Stock sistema', 'Contado', 'Diferencia', 'Reconteo', 'Dif. reconteo', 'Lote real', 'Vcto real', 'Situación', 'Estado ajuste', 'Clave ubicación', 'Origen', 'Corregido', 'Motivo corrección'];
+  var BASE_ANCHOS = [20, 12, 9, 13, 9, 8, 6, 10, 30, 10, 12, 9, 9, 10, 10, 10, 10, 12, 11, 13, 26, 42, 11, 34];
   var F_FECHA = 'dd/mm/yyyy';
   var F_DIF = '[Blue]+0;[Red]-0;0';     // secciones: positivo;negativo;cero. En la del negativo Excel muestra el valor ABSOLUTO, por eso el «-» va escrito a mano. Rojo = menos, azul = más.
   var BASE_FORMATOS = { 2: F_FECHA, 11: F_FECHA, 14: F_DIF, 16: F_DIF, 18: F_FECHA };
@@ -538,7 +540,7 @@
     var torre = f.torre !== null && f.torre !== undefined, sin = f.contado === null || f.contado === undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
     return [toma.id, fecha, torre ? 'Modula' : f.nave ? 'Nave ' + f.nave : null, torre ? 'Torre ' + f.torre : f.pasillo || null, String(f.udc), f.celda || null, f.pos, aCod(f), f.descripcion || '', aLote(f) || null, fechaDe(aVcto(f)),
       f.sistema, sin ? null : f.contado, sin ? null : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? null : f.reconteo - f.sistema, f.lote_real || null, fechaDe(f.vcto_real),
-      sin ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.estado || null, f.clave || null, origen];
+      sin ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.estado || null, f.clave || null, origen, f.corregido_por ? 'Sí' : null, f.motivo_correccion || null];
   }
   function armarBase(toma, filas, archivo, idd) {
     var wb = new window.ExcelJS.Workbook(), ws = wb.addWorksheet('BASE', { views: [{ state: 'frozen', ySplit: 1 }], properties: { tabColor: { argb: 'FFFF7A1A' } } });
@@ -550,7 +552,7 @@
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BASE_COLS.length } };
     ley = wb.addWorksheet('LÉEME'); ley.getColumn(1).width = 24; ley.getColumn(2).width = 120;
     ley.addRow(['BASE de «' + toma.nombre + '»']); ley.getRow(1).font = { bold: true, size: 14 };
-    [['Qué es', 'Todo lo contado de UNA toma: una fila por posición, siempre las mismas 22 columnas en el mismo orden y sin nombres de personas ni observaciones libres.'],
+    [['Qué es', 'Todo lo contado de UNA toma: una fila por posición, siempre las mismas columnas en el mismo orden (las 22 primeras no cambian; al final van «Corregido» y «Motivo corrección») y sin nombres de personas ni observaciones libres, salvo el motivo de una corrección.'],
       ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgala otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
       ['Cómo usarla', 'Copia las filas de la hoja BASE (sin la fila de títulos) y pégalas debajo de tu propia tabla de datos. La columna «ID toma» dice de qué toma es cada fila y permite detectar una toma pegada dos veces.'],
       ['Columnas', BASE_COLS.join(' · ')],
@@ -559,6 +561,7 @@
       ['Estado ajuste', 'Conforme (el valor que vale cuadra con el sistema), Ajustado o No ajustado (lo que anotó el ajustador). Vacío si todavía no hay nada que decir.'],
       ['Celda', 'En un inventario puntual (por código) la celda lleva delante el lugar, por ejemplo «N3-B-MIN · 3BA1», y Nave y Pasillo quedan vacíos. En Modula, Pasillo / Torre dice «Torre 2» y la celda va vacía.'],
       ['Clave ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.'],
+      ['Corregido', '«Sí» si el ajustador o el administrador anuló o corrigió un producto que el contador registró por error; el motivo va en la columna siguiente. Quién lo corrigió no va en la BASE (está en el paquete).'],
       ['Origen', 'Marca de la app en cada fila: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
       ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
       ['Confidencial', 'Contiene datos del almacén: guárdalo donde corresponde y no lo reenvíes sin permiso.']].forEach(function (p) {
@@ -1370,7 +1373,7 @@
         });
       }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el paquete', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
-    base: function (b) {                          // una sola hoja plana (22 columnas) para el dashboard propio. NO es el paquete: no se registra en el servidor y no habilita Archivar
+    base: function (b) {                          // una sola hoja plana (24 columnas) para el dashboard propio. NO es el paquete: no se registra en el servidor y no habilita Archivar
       var id = b.dataset.id; ocupar(b, 'Preparando…');
       Promise.all([cargarExcelJS(), traerPaginas(id, 'excelToma', {}, null)]).then(function (v) {
         var pos = v[1], toma = pos.primero.toma, archivo = archivoToma('BASE_', toma), idd = idDescarga();
