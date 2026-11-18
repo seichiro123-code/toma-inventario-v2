@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.19';
+  var CFG = window.CONFIG, VERSION = 'F4.20';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -123,6 +123,18 @@
   }
   function cerrarModal() { if (typeof detenerCamara === 'function') detenerCamara(); $capa.className = ''; $capa.innerHTML = ''; }
   $capa.addEventListener('click', function (e) { if (e.target === $capa && !$capa.dataset.fija) cerrarModal(); });
+  // Excel quita el 0 inicial de los códigos que son solo números: el servidor completa los de 5 dígitos y lo avisa (datos y catálogo).
+  // Este aviso nunca desaparece solo: el administrador tiene que verlo, porque otro administrador pudo pegar los datos.
+  function htmlCompletados(avisos) {
+    var l = (avisos || []).filter(function (a) { return a.cantidad && /completados$/.test(a.clave); });
+    if (!l.length) return '';
+    return '<b>Se completaron códigos con un 0 al inicio.</b>' + l.map(function (a) { return '<div style="margin-top:6px"><b>' + esc(a.cantidad) + '</b> ' + esc(a.texto) + '</div>'; }).join('') +
+      '<div style="margin-top:6px">Excel quita el 0 de los códigos que son solo números; los de 5 dígitos quedan con 6. Revisa que sean los correctos.</div>';
+  }
+  function avisoCompletados(r) {
+    var h = htmlCompletados(r.avisos);
+    if (h) modal('<h3>Códigos corregidos</h3><div class="aviso">' + h + '</div><div class="botones"><button class="btn amb" data-a="cerrarModal">Entendido</button></div>', true);
+  }
 
   function ordenNat(a, b) { return String(a).localeCompare(String(b), 'es', { numeric: true }); }
 
@@ -664,8 +676,10 @@
       } else {
         h += '<div class="ok">Los datos están bien.' + (abierta ? '' : ' Puedes abrir la toma.') + '</div>';
       }
-      if (inf.informe.advertencias.length) {
-        h += '<div class="sec" style="padding:6px 0">Avisos (no bloquean)</div>' + inf.informe.advertencias.map(function (a) {
+      var c0 = htmlCompletados(inf.informe.advertencias), otros = inf.informe.advertencias.filter(function (a) { return !/completados$/.test(a.clave); });
+      if (c0) h += '<div class="aviso cod0" style="margin:8px 0">' + c0 + '</div>';
+      if (otros.length) {
+        h += '<div class="sec" style="padding:6px 0">Avisos (no bloquean)</div>' + otros.map(function (a) {
           return '<div class="fila" style="padding:8px 0"><div class="info">' + esc(a.texto) + '</div><b class="mono">' + esc(a.cantidad) + '</b></div>'; }).join('');
       }
       if (abierta) h += '<button class="btn rel ancho" data-a="pedirAgregar"' + (inf.ok && inf.previa && (inf.previa.nuevas || inf.previa.actualizar) ? '' : ' disabled') + '>Agregar a la toma</button>';
@@ -1516,7 +1530,9 @@
         liberarBoton(b); if (!r.ok) return toast(r.mensaje || 'No se pudo agregar al catálogo.');
         S.pegadoBarras = ''; renderConScroll();
         toast('Catálogo actualizado: ' + r.nuevos + ' nuevos, ' + r.actualizados + ' completados. Ahora hay ' + r.articulos + ' artículos.');
-        if (r.barras_repetidas) modal('<h3>' + r.barras_repetidas + ' código(s) de barra repetido(s)</h3><p>Hay códigos de barra que quedaron en dos artículos distintos. Al escanearlos, la app podría mostrar el artículo equivocado. Revisa el catálogo en tu Excel y vuelve a agregar los corregidos.</p><div class="botones"><button class="btn amb" data-a="cerrarModal">Entendido</button></div>', true);
+        var cx = htmlCompletados(r.avisos);
+        if (r.barras_repetidas || cx) modal((r.barras_repetidas ? '<h3>' + r.barras_repetidas + ' código(s) de barra repetido(s)</h3><p>Hay códigos de barra que quedaron en dos artículos distintos. Al escanearlos, la app podría mostrar el artículo equivocado. Revisa el catálogo en tu Excel y vuelve a agregar los corregidos.</p>' : '') +
+          (cx ? '<h3>Códigos corregidos</h3><div class="aviso">' + cx + '</div>' : '') + '<div class="botones"><button class="btn amb" data-a="cerrarModal">Entendido</button></div>', true);
       });
     },
     pedirReemplazarCatalogo: function () {
@@ -1545,7 +1561,7 @@
       ocupar(b, 'Abriendo…');
       api('abrirToma', { texto: S.pegado, barras: S.pegadoBarras, nombre: S.nombreToma, modo: S.modoCarga }).then(function (r) {
         if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje); }
-        cerrarModal(); S.informe = null; S.pegado = ''; S.pegadoBarras = ''; S.nombreToma = ''; toast('Toma abierta: ' + r.unidades + ' unidades.'); S.adminTab = 'avance'; S.datos = null; render(); cargarUnidades();
+        cerrarModal(); S.informe = null; S.pegado = ''; S.pegadoBarras = ''; S.nombreToma = ''; toast('Toma abierta: ' + r.unidades + ' unidades.'); S.adminTab = 'avance'; S.datos = null; render(); cargarUnidades(); avisoCompletados(r);
       });
     },
     pedirAgregar: function () {
@@ -1556,7 +1572,7 @@
       ocupar(b, 'Agregando…');
       api('agregarAToma', { texto: S.pegado, barras: S.pegadoBarras, modo: S.modoCarga }).then(function (r) {
         if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje); }
-        cerrarModal(); S.informe = null; S.pegado = ''; S.pegadoBarras = ''; toast(r.sin_cambios ? 'No había nada nuevo.' : 'Agregadas ' + r.nuevas + ' unidades' + (r.actualizadas ? ' y actualizadas ' + r.actualizadas : '') + '.'); S.adminTab = 'avance'; S.datos = null; render(); cargarUnidades(); cargarSegunVista();
+        cerrarModal(); S.informe = null; S.pegado = ''; S.pegadoBarras = ''; toast(r.sin_cambios ? 'No había nada nuevo.' : 'Agregadas ' + r.nuevas + ' unidades' + (r.actualizadas ? ' y actualizadas ' + r.actualizadas : '') + '.'); S.adminTab = 'avance'; S.datos = null; render(); cargarUnidades(); cargarSegunVista(); avisoCompletados(r);
       });
     },
     nuevoUsuario: function () {
