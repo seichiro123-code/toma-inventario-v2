@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.20';
+  var CFG = window.CONFIG, VERSION = 'F4.21';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -554,17 +554,26 @@
       f.sistema, sin ? null : f.contado, sin ? null : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? null : f.reconteo - f.sistema, f.lote_real || null, fechaDe(f.vcto_real),
       sin ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.estado || null, f.clave || null, origen, f.corregido_por ? 'Sí' : null, f.motivo_correccion || null];
   }
+  // Hoja plana con el estilo de la BASE (la usan BASE y UNIDADES): encabezado amarillo fijo, pestaña naranja y el formato de cada columna puesto en la columna (lo heredan también las celdas vacías).
+  function hojaPlana(wb, nombre, cols, anchos, formatos) {
+    var ws = wb.addWorksheet(nombre, { views: [{ state: 'frozen', ySplit: 1 }], properties: { tabColor: { argb: 'FFFF7A1A' } } }), h = ws.getRow(1);
+    cols.forEach(function (n, i) { var c = ws.getColumn(i + 1); c.width = anchos[i]; if (formatos[i + 1]) c.numFmt = formatos[i + 1]; });
+    cols.forEach(function (n, i) { var c = h.getCell(i + 1); c.value = n; c.font = { bold: true, color: { argb: 'FF14161B' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC21A' } }; c.alignment = { wrapText: true, vertical: 'middle' }; });
+    h.height = 30; return ws;
+  }
+  function hojaLeeme(wb, titulo, pares) {
+    var ley = wb.addWorksheet('LÉEME'); ley.getColumn(1).width = 24; ley.getColumn(2).width = 120;
+    ley.addRow([titulo]); ley.getRow(1).font = { bold: true, size: 14 };
+    pares.forEach(function (p) {
+      var r = ley.addRow(p); r.getCell(1).font = { bold: true }; r.getCell(1).alignment = { vertical: 'top' }; r.getCell(2).alignment = { wrapText: true, vertical: 'top' };
+    });
+  }
   function armarBase(toma, filas, archivo, idd) {
-    var wb = new window.ExcelJS.Workbook(), ws = wb.addWorksheet('BASE', { views: [{ state: 'frozen', ySplit: 1 }], properties: { tabColor: { argb: 'FFFF7A1A' } } });
-    var origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, fecha = fechaDe(toma.abierta_en), h = ws.getRow(1), ley, abierta = toma.estado !== 'cerrada';
-    BASE_COLS.forEach(function (n, i) { var c = ws.getColumn(i + 1); c.width = BASE_ANCHOS[i]; if (BASE_FORMATOS[i + 1]) c.numFmt = BASE_FORMATOS[i + 1]; });   // el formato va en la columna: lo heredan también las celdas vacías
-    BASE_COLS.forEach(function (n, i) { var c = h.getCell(i + 1); c.value = n; c.font = { bold: true, color: { argb: 'FF14161B' } }; c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFC21A' } }; c.alignment = { wrapText: true, vertical: 'middle' }; });
-    h.height = 30;
+    var wb = new window.ExcelJS.Workbook(), ws = hojaPlana(wb, 'BASE', BASE_COLS, BASE_ANCHOS, BASE_FORMATOS);
+    var origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, fecha = fechaDe(toma.abierta_en), abierta = toma.estado !== 'cerrada';
     filas.forEach(function (f) { ws.addRow(filaBase(toma, f, origen, fecha)); });
     ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BASE_COLS.length } };
-    ley = wb.addWorksheet('LÉEME'); ley.getColumn(1).width = 24; ley.getColumn(2).width = 120;
-    ley.addRow(['BASE de «' + toma.nombre + '»']); ley.getRow(1).font = { bold: true, size: 14 };
-    [['Qué es', 'Todo lo contado de UNA toma: una fila por posición, siempre las mismas columnas en el mismo orden (las 22 primeras no cambian; al final van «Corregido» y «Motivo corrección») y sin nombres de personas ni observaciones libres, salvo el motivo de una corrección.'],
+    hojaLeeme(wb, 'BASE de «' + toma.nombre + '»', [['Qué es', 'Todo lo contado de UNA toma: una fila por posición, siempre las mismas columnas en el mismo orden (las 22 primeras no cambian; al final van «Corregido» y «Motivo corrección») y sin nombres de personas ni observaciones libres, salvo el motivo de una corrección.'],
       ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgala otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
       ['Cómo usarla', 'Copia las filas de la hoja BASE (sin la fila de títulos) y pégalas debajo de tu propia tabla de datos. La columna «ID toma» dice de qué toma es cada fila y permite detectar una toma pegada dos veces.'],
       ['Columnas', BASE_COLS.join(' · ')],
@@ -576,10 +585,40 @@
       ['Corregido', '«Sí» si el ajustador o el administrador anuló o corrigió un producto que el contador registró por error; el motivo va en la columna siguiente. Quién lo corrigió no va en la BASE (está en el paquete).'],
       ['Origen', 'Marca de la app en cada fila: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
       ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
-      ['Confidencial', 'Contiene datos del almacén: guárdalo donde corresponde y no lo reenvíes sin permiso.']].forEach(function (p) {
-      var r = ley.addRow(p); r.getCell(1).font = { bold: true }; r.getCell(1).alignment = { vertical: 'top' }; r.getCell(2).alignment = { wrapText: true, vertical: 'top' };
-    });
+      ['Confidencial', 'Contiene datos del almacén: guárdalo donde corresponde y no lo reenvíes sin permiso.']]);
     marcar(wb, 'BASE de ' + toma.nombre, archivo, idd);
+    return wb.xlsx.writeBuffer();
+  }
+  // ---------- hoja UNIDADES: una fila por pasillo, torre o reconteo de UNA toma (quién lo contó, cuánto tardó, quién lo ajustó), para la plantilla maestra ----------
+  // 23 columnas fijas y en este orden. Nave y Pasillo / Torre se escriben igual que en la BASE (Nave 3, Modula, Torre 2) para poder filtrar las dos hojas por lo mismo. Sale de la hoja «Unidades» del respaldo
+  // (paqueteToma): una prueba compara las dos fila por fila. NO es el respaldo: no se registra y no habilita Archivar. Lleva códigos de usuario (quién contó y quién ajustó): es confidencial; la BASE no los lleva.
+  var UNI_COLS = ['ID toma', 'Fecha toma', 'Unidad', 'Tipo', 'Zona', 'Nave', 'Pasillo / Torre', 'Estado', 'Contador', 'Tomada', 'Cerrada', 'Minutos', 'Posiciones', 'Contadas', 'Reconteo de', 'N.º pedido', 'Pedido por', 'Pedido el', 'Ajustador', 'Ajuste tomado', 'Ajuste terminado', 'Minutos de ajuste', 'Origen'];
+  var UNI_ANCHOS = [20, 12, 32, 10, 13, 9, 13, 11, 13, 19, 19, 9, 10, 10, 16, 9, 13, 19, 13, 19, 19, 10, 42];
+  var UNI_FORMATOS = { 2: F_FECHA, 10: FMT_HORA, 11: FMT_HORA, 18: FMT_HORA, 20: FMT_HORA, 21: FMT_HORA };
+  function diaLima(iso) { var d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - 5 * 3600000).toISOString(); }   // la lista de tomas trae la hora en UTC: a las 22:30 de Lima ya es el día siguiente
+  function filaExcelUnidad(toma, u, origen, fecha) {      // (filaUnidad ya existe: dibuja la fila de la lista de unidades)
+    var torre = u.torre !== null && u.torre !== undefined, n = function (x) { return x === null || x === undefined ? null : x; };
+    return [toma.id, fecha, u.nombre, u.tipo, u.zona || null, torre ? 'Modula' : u.nave ? 'Nave ' + u.nave : null, torre ? 'Torre ' + u.torre : u.pasillo || null, u.estado, u.operador || null, horaExcel(u.tomado_en), horaExcel(u.cerrado_en),
+      n(u.minutos), u.posiciones, u.contadas, u.reconteo_de || null, n(u.pedido_n), u.pedido_por || null, horaExcel(u.pedido_en), u.ajustador || null, horaExcel(u.ajuste_tomado_en), horaExcel(u.ajuste_terminado_en), n(u.ajuste_minutos), origen];
+  }
+  function armarUnidades(toma, filas, archivo, idd) {
+    var wb = new window.ExcelJS.Workbook(), ws = hojaPlana(wb, 'UNIDADES', UNI_COLS, UNI_ANCHOS, UNI_FORMATOS), abierta = toma.estado !== 'cerrada';
+    var origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, fecha = fechaDe(diaLima(toma.abierta_en));
+    filas.forEach(function (u) { ws.addRow(filaExcelUnidad(toma, u, origen, fecha)); });
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: UNI_COLS.length } };
+    hojaLeeme(wb, 'UNIDADES de «' + toma.nombre + '»', [
+      ['Qué es', 'Una fila por cada pasillo, torre de Modula, inventario puntual o reconteo de UNA toma: quién lo contó, cuándo lo tomó y lo cerró, cuántos minutos tardó, cuántas posiciones tenía, y quién lo ajustó y cuánto tardó en ajustarlo. Siempre las mismas columnas en el mismo orden.'],
+      ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgala otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
+      ['Cómo usarla', 'Con la BASE: la BASE dice QUÉ se contó (una fila por posición) y UNIDADES dice QUIÉN y CUÁNTO TARDÓ (una fila por unidad). Se unen por «ID toma» y «Unidad». Copia las filas (sin la fila de títulos) y pégalas debajo de tu propia tabla de unidades.'],
+      ['Columnas', UNI_COLS.join(' · ')],
+      ['Contador y Ajustador', 'Son el código de usuario con el que entra cada persona (por ejemplo «AndyGu»); la app no guarda nombres reales. Contador = quién contó la unidad; Ajustador = quién la ajustó. En un reconteo, Contador es quien lo recontó.'],
+      ['Tiempos', 'Tomada y Cerrada son la hora de Lima. Minutos = de que se tomó a que se cerró (incluye pausas). Minutos de ajuste = de que se tomó el ajuste a que se terminó. Posiciones y Contadas sirven para calcular posiciones por hora.'],
+      ['Nave y Pasillo / Torre', 'Igual que en la BASE: «Nave 3» y el pasillo; en Modula, Nave dice «Modula» y Pasillo / Torre dice «Torre 2». Un inventario puntual (por código) no tiene nave ni pasillo: su lugar va en la columna Unidad.'],
+      ['Reconteo de, N.º pedido, Pedido por', 'Solo se llenan en las unidades de reconteo: de qué unidad viene, el número del pedido, quién lo pidió y cuándo.'],
+      ['Origen', 'Marca de la app en cada fila: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
+      ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
+      ['Confidencial', 'Dice quién contó y quién ajustó cada unidad: son datos de personas. Úsala para mejorar el proceso, no como prueba por sí sola, y no la reenvíes sin permiso. La BASE no lleva personas.']]);
+    marcar(wb, 'UNIDADES de ' + toma.nombre, archivo, idd);
     return wb.xlsx.writeBuffer();
   }
   // El servidor entrega cada hoja por trozos de hasta 2.000 filas; aquí se juntan. Las usan el paquete y la BASE.
@@ -692,14 +731,15 @@
   // Una toma cerrada con el paquete al día se puede archivar: se borra de la nube y queda lo que bajaste.
   function paquetesToma() {
     var t = S.tomas; if (!t || !t.length) return '';
-    return '<div class="sec" style="padding:14px 0 6px">Paquete de análisis</div><p class="pie" style="padding:0 0 8px">Baja todo lo contado, con su historial, las diferencias y los tiempos. Guárdalo: es el registro de la toma. Cuando la toma esté cerrada y el paquete bajado, podrás archivarla (se borra de la nube). La BASE es una sola hoja con una fila por posición, para cargarla en tu propio dashboard; no cuenta como paquete.</p><ul class="lista" style="margin:0 -14px">' +
+    return '<div class="sec" style="padding:14px 0 6px">Descargas de la toma</div><p class="pie" style="padding:0 0 8px"><b>Descargar BASE</b>: una fila por posición, para tu plantilla maestra o tu dashboard. <b>Descargar UNIDADES</b>: una fila por pasillo, torre o reconteo, con quién lo contó y cuánto tardó (son códigos de usuario: confidencial); también va a la plantilla maestra. <b>Respaldo (para archivar)</b>: el paquete completo, con historial, versiones y eventos; guárdalo, no lo cargues en la plantilla maestra. Cuando la toma esté cerrada y el respaldo bajado, podrás archivarla (se borra de la nube). BASE y UNIDADES no cuentan para archivar.</p><ul class="lista" style="margin:0 -14px">' +
       t.slice(0, 5).map(function (x) {
         var arch = !!x.archivada_en, cerr = x.estado === 'cerrada', pq = x.paquete, det;
         if (arch) det = 'Archivada el ' + fecha(x.archivada_en) + ' · ' + x.filas + ' posiciones';
         else det = (cerr ? 'Cerrada' : 'Abierta') + ' · ' + fecha(x.abierta_en) + ' · ' + x.filas + ' posiciones' + (cerr ? (pq ? (pq.al_dia ? ' · paquete bajado ' + hace(pq.bajado_en) : ' · cambió después de bajar el paquete') : ' · paquete sin bajar') : '');
         return '<li class="fila toma"><div class="info"><div class="nom">' + esc(x.nombre) + '</div><div class="det">' + esc(det) + '</div></div><div class="acc">' +
-          (arch ? '' : '<button class="btn peq rel" data-a="paquete" data-id="' + esc(x.id) + '">Descargar paquete</button>' +
+          (arch ? '' : '<button class="btn peq rel" data-a="paquete" data-id="' + esc(x.id) + '">Respaldo (para archivar)</button>' +
             '<button class="btn peq gr" data-a="base" data-id="' + esc(x.id) + '">Descargar BASE</button>' +
+            '<button class="btn peq gr" data-a="unidades" data-id="' + esc(x.id) + '">Descargar UNIDADES</button>' +
             (cerr ? '<button class="btn peq pel" data-a="pedirArchivar" data-id="' + esc(x.id) + '"' + (pq && pq.al_dia ? '' : ' disabled') + '>Archivar</button>' : '')) + '</div></li>'; }).join('') + '</ul>';
   }
   function recargarTomas() { return api('listarTomas').then(function (r) { if (r.ok) { S.tomas = r.tomas; renderConScroll(); } }); }
@@ -1377,15 +1417,15 @@
         var archivo = archivoToma('Paquete_', toma), idd = idDescarga();
         return armarPaquete(toma, pos.primero.resumen, pos.filas, { versiones: v[2].filas, unidades: v[3].filas, eventos: v[4].filas, anotaciones: v[5].filas }, archivo, idd).then(function (buf) {
           descargarArchivo(buf, archivo); liberarBoton(b);
-          if (toma.estado !== 'cerrada') return avisoPaquete('Paquete descargado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalo otra vez.');
+          if (toma.estado !== 'cerrada') return avisoPaquete('Respaldo descargado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalo otra vez.');
           // toma cerrada: el servidor coteja lo recibido; si coincide, queda anotado y se podrá archivar
           return api('registrarPaquete', { id: id, conteos: cont }).then(function (r) {
-            if (r.ok) avisoPaquete('Paquete descargado y registrado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. Ábrelo y comprueba que está completo antes de archivar la toma.');
-            else avisoPaquete('El paquete se bajó, pero no quedó registrado', archivo, (r.mensaje || 'No se pudo registrar.') + ' Sin registro no se puede archivar la toma: descárgalo de nuevo.', true);
+            if (r.ok) avisoPaquete('Respaldo descargado y registrado', archivo, 'Tiene ' + cont.posiciones + ' posiciones. Ábrelo y comprueba que está completo antes de archivar la toma.');
+            else avisoPaquete('El respaldo se bajó, pero no quedó registrado', archivo, (r.mensaje || 'No se pudo registrar.') + ' Sin registro no se puede archivar la toma: descárgalo de nuevo.', true);
             return recargarTomas();
           });
         });
-      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el paquete', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
+      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el respaldo', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
     base: function (b) {                          // una sola hoja plana (24 columnas) para el dashboard propio. NO es el paquete: no se registra en el servidor y no habilita Archivar
       var id = b.dataset.id; ocupar(b, 'Preparando…');
@@ -1395,9 +1435,22 @@
           descargarArchivo(buf, archivo); liberarBoton(b);
           avisoPaquete('BASE descargada', archivo, 'Tiene ' + pos.filas.length + ' posiciones, una fila cada una. ' + (toma.estado !== 'cerrada'
             ? 'La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgala otra vez.'
-            : 'La BASE no reemplaza al paquete: para poder archivar la toma, baja también el paquete.'));
+            : 'La BASE no reemplaza al respaldo: para poder archivar la toma, baja también el respaldo.'));
         });
       }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear la BASE', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
+    },
+    unidades: function (b) {                      // una fila por pasillo, torre o reconteo (quién contó y cuánto tardó) para la plantilla maestra. NO es el respaldo: no se registra en el servidor y no habilita Archivar
+      var id = b.dataset.id, toma = (S.tomas || []).filter(function (x) { return x.id === id; })[0]; if (!toma) return toast('Actualiza la lista de tomas e inténtalo de nuevo.');
+      ocupar(b, 'Preparando…');
+      Promise.all([cargarExcelJS(), traerPaginas(id, 'paqueteToma', { hoja: 'unidades' }, null)]).then(function (v) {
+        var archivo = archivoToma('UNIDADES_', toma), idd = idDescarga();
+        return armarUnidades(toma, v[1].filas, archivo, idd).then(function (buf) {
+          descargarArchivo(buf, archivo); liberarBoton(b);
+          avisoPaquete('UNIDADES descargadas', archivo, 'Tiene ' + v[1].filas.length + ' unidades (pasillos, torres, puntuales y reconteos), una fila cada una. ' + (toma.estado !== 'cerrada'
+            ? 'La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalas otra vez.'
+            : 'Las UNIDADES no reemplazan al respaldo: para poder archivar la toma, baja también el respaldo.'));
+        });
+      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear la hoja UNIDADES', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
     pedirArchivar: function (b) {
       var t = (S.tomas || []).filter(function (x) { return x.id === b.dataset.id; })[0]; if (!t) return;
