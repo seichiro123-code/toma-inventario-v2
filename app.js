@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.21';
+  var CFG = window.CONFIG, VERSION = 'F4.22';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -82,12 +82,12 @@
     return api('listarUnidades').then(function (r) {
       if (!r.ok) {
         if (!S.datos) { S.errCarga = r.mensaje || 'No se pudo cargar.'; render(); }
-        else { if (!silencioso) toast(r.mensaje || 'No se pudo cargar.'); if (estabaOn !== S.online) renderConScroll(); }
+        else { if (!silencioso) toast(r.mensaje || 'No se pudo cargar.'); if (estabaOn !== S.online) renderFondo(); }
         return r;
       }
       S.errCarga = '';
       var antes = JSON.stringify(S.datos); S.datos = r;
-      if (antes !== JSON.stringify(r) || !silencioso) renderConScroll();
+      if (antes !== JSON.stringify(r) || !silencioso) renderFondo();
       return r;
     });
   }
@@ -98,7 +98,7 @@
       if (S.adminTab === 'historial') return buscarHistorial();
       if (S.adminTab === 'vivo') return api('enVivo').then(function (r) { if (r.ok) { var igual = !!S.vivo && !S.errCarga && JSON.stringify(r) === JSON.stringify(S.vivo); S.errCarga = ''; S.vivo = r; if (!igual || !silencioso) renderConScroll(); } else if (!S.vivo) { S.errCarga = r.mensaje; render(); } });
       if (S.adminTab === 'avance') api('avance').then(function (r) { if (r.ok && r.toma_activa) { S.av = r; renderConScroll(); } });
-      if (S.adminTab === 'carga') api('listarTomas').then(function (r) { if (r.ok && JSON.stringify(r.tomas) !== JSON.stringify(S.tomas)) { S.tomas = r.tomas; renderConScroll(); } });
+      if (S.adminTab === 'carga') api('listarTomas').then(function (r) { if (r.ok && JSON.stringify(r.tomas) !== JSON.stringify(S.tomas)) { S.tomas = r.tomas; renderFondo(); } });
     }
     return cargarUnidades(silencioso);
   }
@@ -146,6 +146,8 @@
       '<div class="campo"><label for="u">Usuario</label><input id="u" name="usuario" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required></div>' +
       '<div class="campo"><label for="p">PIN</label><input id="p" class="pin" name="pin" type="password" inputmode="numeric" autocomplete="current-password" maxlength="10" required></div>' +
       '<div id="msg"></div><button class="btn rel ancho" type="submit">Entrar</button>' +
+      // El aviso de datos va justo debajo de Entrar: más abajo queda fuera de la pantalla en un celular normal y casi nadie lo lee.
+      '<p class="pie datos">Esta app guarda quién cuenta cada posición y a qué hora.<button type="button" class="enlace" data-a="avisoDatos">Más información</button></p>' +
       '<p class="pie">¿No tienes usuario o olvidaste tu PIN? Pídelo al administrador.</p></form><footer class="firma"><svg aria-hidden="true"><use href="#cubo"/></svg></footer></main>';
   }
   function vistaPin() {
@@ -276,9 +278,11 @@
   function aEditable(d) { var u = d.unidad; return u.estado === 'Cerrado' && u.ajustador === S.ses.usuario && !u.ajuste_terminado_en; }
   // Decisión 61: producto que el contador registró en una posición vacía; lo corrige quien ajusta el pasillo (o el administrador) mientras la toma esté abierta
   function aPuedeCorregir(d, f) { return d.unidad.estado === 'Cerrado' && !!f.codigo_reg && !aEnRecon(f) && (S.ses.rol === 'administrador' || aEditable(d)); }
-  function aCod(f) { return f.codigo || f.codigo_reg || ''; }
-  function aLote(f) { return f.codigo ? f.lote : (f.lote_reg || ''); }
-  function aVcto(f) { return f.codigo ? f.vcto : f.vcto_reg; }
+  // El servidor deja en `codigo` el artículo que el sistema tenía en la posición (también cuando está vacía: stock 0) y manda en `codigo_reg` lo que el contador REGISTRÓ ahí: lo que vale es lo registrado.
+  function aCod(f) { return f.codigo_reg || f.codigo || ''; }
+  function aLote(f) { return f.codigo_reg ? (f.lote_reg || '') : f.lote; }
+  function aVcto(f) { return f.codigo_reg ? f.vcto_reg : f.vcto; }
+  function aDesc(f) { return f.codigo_reg ? descDe(f.codigo_reg) : (f.descripcion || ''); }   // la descripción de `f.descripcion` es la del artículo anterior: bajo el código registrado va la del catálogo, o vacía
   function aMuestra(f) { return !!f.codigo || !!f.codigo_reg || (f.contado !== null && f.contado > 0); }   // las posiciones vacías sin nada no se muestran
   function aFiltra(f) {
     if (!aMuestra(f)) return false;
@@ -292,7 +296,7 @@
     return '<tr data-fila="' + esc(f.id) + '"' + (AJ.cur === f.id ? ' class="sel"' : '') + '>' +
       '<td class="ck"><input type="checkbox" data-k="' + esc(f.id) + '"' + (AJ.sel[f.id] ? ' checked' : '') + (puede ? '' : ' disabled') + ' aria-label="Recontar ' + esc(cod) + '"></td>' +
       '<td class="mono">' + esc(cod) + (!f.codigo && cod ? ' <span class="pill am">nuevo</span>' : '') + '</td>' +
-      '<td>' + esc(f.descripcion || (cod && !f.codigo ? 'Registrado por el contador' : '')) + '</td><td>' + esc(f.udc) + '</td><td>' + esc(f.celda) + '</td><td>' + esc(f.pos) + '</td>' +
+      '<td>' + esc(aDesc(f) || (f.codigo_reg ? 'Registrado por el contador' : '')) + '</td><td>' + esc(f.udc) + '</td><td>' + esc(f.celda) + '</td><td>' + esc(f.pos) + '</td>' +
       '<td>' + esc(aLote(f)) + '</td><td>' + esc(aVcto(f) ? fmtVcto(aVcto(f)) : '') + '</td>' +
       '<td class="n">' + aCant(f.sistema) + '</td><td class="n' + aClase(f.contado, f.sistema) + '">' + aCant(f.contado) + '</td>' +
       '<td class="n' + (r ? aClase(r.cantidad, f.sistema) : '') + '">' + (r ? r.cantidad : (aEnRecon(f) ? '<span class="pill am">en reconteo</span>' : '')) + '</td>' +
@@ -318,7 +322,7 @@
     var rs = f.reconteos.map(function (r) {
       return '<div><small>Reconteo ' + r.n + ' · ' + (r.cantidad === null ? (r.estado === 'En conteo' ? 'se está contando' : 'pendiente') : esc(r.usuario)) + '</small><b>' + (r.cantidad === null ? '—' : r.cantidad) + '</b></div>';
     }).join('');
-    return '<b>' + esc(aCod(f)) + ' · ' + esc(f.descripcion || '') + '</b><div class="ajg"><div><small>Sistema</small><b>' + aCant(f.sistema) + '</b></div><div><small>1.er conteo' + (f.contado_por ? ' · ' + esc(f.contado_por) : '') + '</small><b>' + (f.contado === null ? '—' : f.contado) + '</b></div>' + rs + '</div><div class="lect">' + esc(aLectura(f)) + '</div>' +
+    return '<b>' + esc(aCod(f)) + ' · ' + esc(aDesc(f)) + '</b><div class="ajg"><div><small>Sistema</small><b>' + aCant(f.sistema) + '</b></div><div><small>1.er conteo' + (f.contado_por ? ' · ' + esc(f.contado_por) : '') + '</small><b>' + (f.contado === null ? '—' : f.contado) + '</b></div>' + rs + '</div><div class="lect">' + esc(aLectura(f)) + '</div>' +
       (aPuedeCorregir(d, f) ? '<button class="btn gr peq" data-a="corregirReg" data-id="' + esc(f.id) + '">Anular o corregir registro</button>' : '');
   }
   function ajRecuento(d) {
@@ -392,8 +396,8 @@
   function pinta(c, argb, letra) { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb } }; c.font = { color: { argb: letra } }; }
   function cantidad(c, v, s) { if (v === null || v === undefined) return; if (v < s) pinta(c, 'FFF7C1C1', 'FF791F1F'); else if (v > s) pinta(c, 'FFB5D4F4', 'FF0C447C'); }   // rojo: menor · azul: mayor · sin color: igual
   // ---------- marca de agua y ID de descarga ----------
-  // Los tres Excel que baja la app (paquete, BASE y el del ajustador) llevan la marca en capas: imagen de fondo, encabezado y pie al imprimir, propiedades del archivo y,
-  // en la BASE, la columna Origen de cada fila. Sirve para saber de dónde viene un archivo si lo reenvían; no es una protección (el fondo se quita y no viaja al copiar celdas).
+  // Los Excel que baja la app (respaldo, TOMA, MAESTRO y el del ajustador) llevan la marca en capas: imagen de fondo, encabezado y pie al imprimir, propiedades del archivo y,
+  // en las hojas de datos de la TOMA y el MAESTRO, la columna Origen de cada fila. Sirve para saber de dónde viene un archivo si lo reenvían; no es una protección (el fondo se quita y no viaja al copiar celdas).
   var MARCA = { grande: 'BenitoStock', chica: 'generado con la app' };
   function ahoraLima() { return new Date(Date.now() - 5 * 3600000); }       // Lima es UTC-5 todo el año: la fecha se lee con los métodos UTC de este objeto
   function idDescarga() {                                                    // D-AAAAMMDD-HHMM-XXXX: hora de Lima + 4 caracteres al azar (sin 0, O, 1, I)
@@ -431,7 +435,7 @@
     encabezado(ws, cols);
     d.filas.filter(aMuestra).forEach(function (f) {
       var r = aRecon(f);
-      var row = ws.addRow([aCod(f), f.descripcion || '', String(f.udc), f.celda, f.pos, aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema, f.contado, r ? r.cantidad : null, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '', aEstado(f), f.obs || '', f.id]);
+      var row = ws.addRow([aCod(f), aDesc(f), String(f.udc), f.celda, f.pos, aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema, f.contado, r ? r.cantidad : null, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '', aEstado(f), f.obs || '', f.id]);
       cantidad(row.getCell(9), f.contado, f.sistema); if (r) cantidad(row.getCell(10), r.cantidad, f.sistema);
       if (f.lote_real) pinta(row.getCell(11), 'FFFAEEDA', 'FF633806'); if (f.vcto_real) pinta(row.getCell(12), 'FFFAEEDA', 'FF633806');
       pinta(row.getCell(13), 'FFE6F1FB', 'FF0C447C'); pinta(row.getCell(14), 'FFE6F1FB', 'FF0C447C');
@@ -462,7 +466,7 @@
     filas.forEach(function (f) {
       var cod = aCod(f); if (!cod) return;
       var a = g[cod]; if (!a) { a = g[cod] = { cod: cod, desc: '', ubic: 0, sis: 0, con: 0, falt: 0, sobr: 0, nfalt: 0, nsobr: 0, sin: 0, rec: 0 }; lista.push(a); }
-      if (!a.desc && f.descripcion) a.desc = f.descripcion;
+      if (!a.desc && aDesc(f)) a.desc = aDesc(f);
       a.ubic++; if (f.n_reconteos) a.rec++;
       if (f.contado === null || f.contado === undefined) { a.sin++; return; }
       var d = f.contado - f.sistema; a.sis += f.sistema; a.con += f.contado;
@@ -505,7 +509,7 @@
       ['Corregido por', 13], ['Hora corrección', 17], ['Motivo corrección', 30], ['Clave ubicación', 26], ['ID toma', 18], ['CLAVE', 22]]);
     filas.forEach(function (f) {
       var torre = f.torre !== null && f.torre !== undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
-      var row = ws.addRow([torre ? 'Modula' : f.nave, torre ? 'Torre ' + f.torre : f.pasillo, String(f.udc), f.celda, f.pos, aCod(f), f.descripcion || '', aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema,
+      var row = ws.addRow([torre ? 'Modula' : f.nave, torre ? 'Torre ' + f.torre : f.pasillo, String(f.udc), f.celda, f.pos, aCod(f), aDesc(f), aLote(f), aVcto(f) ? fmtVcto(aVcto(f)) : '', f.sistema,
         f.contado, f.contado === null ? '' : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? '' : f.reconteo - f.sistema, f.lote_real || '', f.vcto_real ? fmtVcto(f.vcto_real) : '',
         f.contado === null ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.contado_por || '', f.contado_en || '', f.reconteo_por || '', f.estado || '', f.obs || '', f.ajustador || '', f.ajuste_hora || '', f.obs_contador || '', f.corregido_por || '', f.corregido_en || '', f.motivo_correccion || '', f.clave || '', toma.id, f.id]);
       cantidad(row.getCell(11), f.contado, f.sistema); if (!sinRec) cantidad(row.getCell(13), f.reconteo, f.sistema);
@@ -535,9 +539,9 @@
     marcar(wb, 'Paquete de ' + toma.nombre, archivo, idd);
     return wb.xlsx.writeBuffer();
   }
-  // ---------- hoja BASE: todo lo contado de UNA toma, para cargarlo en el dashboard propio ----------
-  // 24 columnas fijas y en este orden (las 22 primeras no se mueven: hay dashboards que las pegan) (es el contrato con quien la pega en su Excel o su Power BI), una fila por posición, sin nombres de personas ni observaciones libres.
-  // Sale de las mismas filas que la hoja «Toma» del paquete: una prueba compara las dos posición por posición. NO es el paquete: no se registra y no habilita Archivar.
+  // ---------- hoja POSICIONES (antes se bajaba suelta como «BASE»): todo lo contado de UNA toma ----------
+  // 24 columnas fijas y en este orden (las 22 primeras no se mueven: hay dashboards que las pegan; es el contrato con quien la pega en su Excel o su Power BI), una fila por posición, sin nombres de personas ni observaciones libres.
+  // Sale de las mismas filas que la hoja «Toma» del respaldo: una prueba compara las dos posición por posición.
   var BASE_COLS = ['ID toma', 'Fecha toma', 'Nave', 'Pasillo / Torre', 'UDC', 'Celda', 'POS', 'Código', 'Descripción', 'Lote', 'Vcto', 'Stock sistema', 'Contado', 'Diferencia', 'Reconteo', 'Dif. reconteo', 'Lote real', 'Vcto real', 'Situación', 'Estado ajuste', 'Clave ubicación', 'Origen', 'Corregido', 'Motivo corrección'];
   var BASE_ANCHOS = [20, 12, 9, 13, 9, 8, 6, 10, 30, 10, 12, 9, 9, 10, 10, 10, 10, 12, 11, 13, 26, 42, 11, 34];
   var F_FECHA = 'dd/mm/yyyy';
@@ -550,11 +554,11 @@
   }
   function filaBase(toma, f, origen, fecha) {       // todo lo vacío va como null (una celda vacía), no como texto vacío; undefined saltaría la celda y perdería su formato
     var torre = f.torre !== null && f.torre !== undefined, sin = f.contado === null || f.contado === undefined, sinRec = f.reconteo === null || f.reconteo === undefined;
-    return [toma.id, fecha, torre ? 'Modula' : f.nave ? 'Nave ' + f.nave : null, torre ? 'Torre ' + f.torre : f.pasillo || null, String(f.udc), f.celda || null, f.pos, aCod(f), f.descripcion || '', aLote(f) || null, fechaDe(aVcto(f)),
+    return [toma.id, fecha, torre ? 'Modula' : f.nave ? 'Nave ' + f.nave : null, torre ? 'Torre ' + f.torre : f.pasillo || null, String(f.udc), f.celda || null, f.pos, aCod(f), aDesc(f), aLote(f) || null, fechaDe(aVcto(f)),
       f.sistema, sin ? null : f.contado, sin ? null : f.contado - f.sistema, sinRec ? null : f.reconteo, sinRec ? null : f.reconteo - f.sistema, f.lote_real || null, fechaDe(f.vcto_real),
       sin ? 'Sin contar' : (f.vacia ? 'Vacía' : 'Contada'), f.estado || null, f.clave || null, origen, f.corregido_por ? 'Sí' : null, f.motivo_correccion || null];
   }
-  // Hoja plana con el estilo de la BASE (la usan BASE y UNIDADES): encabezado amarillo fijo, pestaña naranja y el formato de cada columna puesto en la columna (lo heredan también las celdas vacías).
+  // Hoja plana (la usan POSICIONES y UNIDADES del archivo TOMA): encabezado amarillo fijo, pestaña naranja y el formato de cada columna puesto en la columna (lo heredan también las celdas vacías).
   function hojaPlana(wb, nombre, cols, anchos, formatos) {
     var ws = wb.addWorksheet(nombre, { views: [{ state: 'frozen', ySplit: 1 }], properties: { tabColor: { argb: 'FFFF7A1A' } } }), h = ws.getRow(1);
     cols.forEach(function (n, i) { var c = ws.getColumn(i + 1); c.width = anchos[i]; if (formatos[i + 1]) c.numFmt = formatos[i + 1]; });
@@ -568,60 +572,126 @@
       var r = ley.addRow(p); r.getCell(1).font = { bold: true }; r.getCell(1).alignment = { vertical: 'top' }; r.getCell(2).alignment = { wrapText: true, vertical: 'top' };
     });
   }
-  function armarBase(toma, filas, archivo, idd) {
-    var wb = new window.ExcelJS.Workbook(), ws = hojaPlana(wb, 'BASE', BASE_COLS, BASE_ANCHOS, BASE_FORMATOS);
-    var origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, fecha = fechaDe(toma.abierta_en), abierta = toma.estado !== 'cerrada';
-    filas.forEach(function (f) { ws.addRow(filaBase(toma, f, origen, fecha)); });
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: BASE_COLS.length } };
-    hojaLeeme(wb, 'BASE de «' + toma.nombre + '»', [['Qué es', 'Todo lo contado de UNA toma: una fila por posición, siempre las mismas columnas en el mismo orden (las 22 primeras no cambian; al final van «Corregido» y «Motivo corrección») y sin nombres de personas ni observaciones libres, salvo el motivo de una corrección.'],
-      ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgala otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
-      ['Cómo usarla', 'Copia las filas de la hoja BASE (sin la fila de títulos) y pégalas debajo de tu propia tabla de datos. La columna «ID toma» dice de qué toma es cada fila y permite detectar una toma pegada dos veces.'],
-      ['Columnas', BASE_COLS.join(' · ')],
-      ['Diferencia', 'Contado − sistema (rojo: menos · azul: más). «Reconteo» y «Dif. reconteo» se llenan solo si esa posición se recontó. Las posiciones «Sin contar» no traen contado ni diferencia.'],
-      ['Situación', 'Contada, Vacía (el contador la marcó vacía) o Sin contar (nadie la contó todavía).'],
-      ['Estado ajuste', 'Conforme (el valor que vale cuadra con el sistema), Ajustado o No ajustado (lo que anotó el ajustador). Vacío si todavía no hay nada que decir.'],
-      ['Celda', 'En un inventario puntual (por código) la celda lleva delante el lugar, por ejemplo «N3-B-MIN · 3BA1», y Nave y Pasillo quedan vacíos. En Modula, Pasillo / Torre dice «Torre 2» y la celda va vacía.'],
-      ['Clave ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.'],
-      ['Corregido', '«Sí» si el ajustador o el administrador anuló o corrigió un producto que el contador registró por error; el motivo va en la columna siguiente. Quién lo corrigió no va en la BASE (está en el paquete).'],
-      ['Origen', 'Marca de la app en cada fila: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
-      ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
-      ['Confidencial', 'Contiene datos del almacén: guárdalo donde corresponde y no lo reenvíes sin permiso.']]);
-    marcar(wb, 'BASE de ' + toma.nombre, archivo, idd);
-    return wb.xlsx.writeBuffer();
-  }
-  // ---------- hoja UNIDADES: una fila por pasillo, torre o reconteo de UNA toma (quién lo contó, cuánto tardó, quién lo ajustó), para la plantilla maestra ----------
-  // 23 columnas fijas y en este orden. Nave y Pasillo / Torre se escriben igual que en la BASE (Nave 3, Modula, Torre 2) para poder filtrar las dos hojas por lo mismo. Sale de la hoja «Unidades» del respaldo
-  // (paqueteToma): una prueba compara las dos fila por fila. NO es el respaldo: no se registra y no habilita Archivar. Lleva códigos de usuario (quién contó y quién ajustó): es confidencial; la BASE no los lleva.
+  // ---------- hoja UNIDADES: una fila por pasillo, torre, puntual o reconteo de UNA toma (quién lo contó, cuánto tardó, quién lo ajustó) ----------
+  // 23 columnas fijas (el archivo TOMA les agrega 8 de tiempos). Nave y Pasillo / Torre se escriben igual que en POSICIONES (Nave 3, Modula, Torre 2) para poder filtrar las dos hojas por lo mismo. Sale de la hoja «Unidades» del respaldo
+  // (paqueteToma): una prueba compara las dos fila por fila. Lleva códigos de usuario (quién contó y quién ajustó): es confidencial; POSICIONES no los lleva.
   var UNI_COLS = ['ID toma', 'Fecha toma', 'Unidad', 'Tipo', 'Zona', 'Nave', 'Pasillo / Torre', 'Estado', 'Contador', 'Tomada', 'Cerrada', 'Minutos', 'Posiciones', 'Contadas', 'Reconteo de', 'N.º pedido', 'Pedido por', 'Pedido el', 'Ajustador', 'Ajuste tomado', 'Ajuste terminado', 'Minutos de ajuste', 'Origen'];
   var UNI_ANCHOS = [20, 12, 32, 10, 13, 9, 13, 11, 13, 19, 19, 9, 10, 10, 16, 9, 13, 19, 13, 19, 19, 10, 42];
   var UNI_FORMATOS = { 2: F_FECHA, 10: FMT_HORA, 11: FMT_HORA, 18: FMT_HORA, 20: FMT_HORA, 21: FMT_HORA };
-  function diaLima(iso) { var d = new Date(iso); return isNaN(d) ? '' : new Date(d.getTime() - 5 * 3600000).toISOString(); }   // la lista de tomas trae la hora en UTC: a las 22:30 de Lima ya es el día siguiente
   function filaExcelUnidad(toma, u, origen, fecha) {      // (filaUnidad ya existe: dibuja la fila de la lista de unidades)
     var torre = u.torre !== null && u.torre !== undefined, n = function (x) { return x === null || x === undefined ? null : x; };
     return [toma.id, fecha, u.nombre, u.tipo, u.zona || null, torre ? 'Modula' : u.nave ? 'Nave ' + u.nave : null, torre ? 'Torre ' + u.torre : u.pasillo || null, u.estado, u.operador || null, horaExcel(u.tomado_en), horaExcel(u.cerrado_en),
       n(u.minutos), u.posiciones, u.contadas, u.reconteo_de || null, n(u.pedido_n), u.pedido_por || null, horaExcel(u.pedido_en), u.ajustador || null, horaExcel(u.ajuste_tomado_en), horaExcel(u.ajuste_terminado_en), n(u.ajuste_minutos), origen];
   }
-  function armarUnidades(toma, filas, archivo, idd) {
-    var wb = new window.ExcelJS.Workbook(), ws = hojaPlana(wb, 'UNIDADES', UNI_COLS, UNI_ANCHOS, UNI_FORMATOS), abierta = toma.estado !== 'cerrada';
-    var origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, fecha = fechaDe(diaLima(toma.abierta_en));
-    filas.forEach(function (u) { ws.addRow(filaExcelUnidad(toma, u, origen, fecha)); });
-    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: UNI_COLS.length } };
-    hojaLeeme(wb, 'UNIDADES de «' + toma.nombre + '»', [
-      ['Qué es', 'Una fila por cada pasillo, torre de Modula, inventario puntual o reconteo de UNA toma: quién lo contó, cuándo lo tomó y lo cerró, cuántos minutos tardó, cuántas posiciones tenía, y quién lo ajustó y cuánto tardó en ajustarlo. Siempre las mismas columnas en el mismo orden.'],
+  // ---------- archivo TOMA: todo lo de UNA toma en 7 hojas, para pegarlo en la plantilla MAESTRO (Decisión 77, Fase 3a) ----------
+  // POSICIONES (24 columnas) · UNIDADES (23 columnas + 8 de tiempos del contador) · INCIDENCIAS · POR CÓDIGO · FRANJAS · PAUSAS · LÉEME. Solo valores: las cuentas las hace el MAESTRO.
+  // Sale de excelToma (posiciones), paqueteToma 'unidades' y tiemposToma. NO es el respaldo: no se registra y no habilita Archivar. Las hojas con personas (UNIDADES, INCIDENCIAS, FRANJAS, PAUSAS) son confidenciales.
+  var UMBRAL_PAUSA = 5;      // minutos: un hueco entre dos guardados cuenta si lo SUPERA (exactamente 5,0 no); el servidor guarda además todo hueco de 3 min o más en PAUSAS
+  var UNI_TOMA_COLS = UNI_COLS.concat(['1.er guardado', 'Último guardado', 'Min. abierta', 'Huecos > ' + UMBRAL_PAUSA + ' min', 'Min. en pausa', 'Mayor hueco (min)', 'Ritmo mediano (s)', 'Con diferencia']);
+  var UNI_TOMA_ANCHOS = UNI_ANCHOS.concat([19, 19, 10, 10, 10, 10, 10, 10]);
+  var UNI_TOMA_FORMATOS = { 2: F_FECHA, 10: FMT_HORA, 11: FMT_HORA, 18: FMT_HORA, 20: FMT_HORA, 21: FMT_HORA, 24: FMT_HORA, 25: FMT_HORA };
+  var INC_COLS = ['ID toma', 'Tipo', 'Incidencia', 'Unidad', 'Código', 'Clave ubicación', 'Detalle', 'Cantidad', 'Responsable', 'Origen'];
+  var PC_COLS = ['ID toma', 'Código', 'Descripción', 'Ubicaciones contadas', 'Diferencia neta', 'Origen'];
+  var FRA_COLS = ['ID toma', 'Contador', 'Unidad', 'Franja inicio', 'Franja n.º', 'Guardados', 'Origen'];
+  var PAU_COLS = ['ID toma', 'Contador', 'Unidad', 'Tipo', 'Desde', 'Hasta', 'Min', 'Desde servidor', 'Hasta servidor', 'Confirma servidor', 'Antes (UDC·POS)', 'Después (UDC·POS)', 'Origen'];
+  // lo que hay que mirar de la toma, una fila por cosa y en orden de tipo: c diferencia grande · d reconteo · e corrección de registro · f lote o vcto distinto · g sin contar al cerrar la unidad · h «No ajustado»
+  function incidenciasToma(toma, filas, origen) {
+    var T = { c: [], d: [], e: [], f: [], g: [], h: [] }, resp = toma.abierta_por || '', hay = function (x) { return x !== null && x !== undefined; };
+    function fila(t, nombre, f, detalle, cant) { T[t].push([toma.id, t, nombre, f.unidad || null, aCod(f) || null, f.clave || null, detalle, cant, resp, origen]); }
+    filas.forEach(function (f) {
+      var sin = !hay(f.contado), dif = sin ? 0 : f.contado - f.sistema, partes = [];
+      if (!sin && difGrande(dif, f.sistema)) fila('c', 'Diferencia grande ⚠', f, 'sistema ' + f.sistema + ' → contado ' + f.contado, Math.abs(dif));
+      if (hay(f.reconteo)) fila('d', 'Reconteo pedido', f, '1.º ' + (sin ? '—' : f.contado) + ' · reconteo ' + f.reconteo, 1);
+      if (f.corregido_por) fila('e', 'Corrección de registro', f, f.motivo_correccion || '', 1);
+      if (f.lote_real) partes.push('lote ' + (aLote(f) || '—') + ' → ' + f.lote_real);
+      if (f.vcto_real) partes.push('vcto ' + (fmtVcto(aVcto(f)) || '—') + ' → ' + fmtVcto(f.vcto_real));
+      if (partes.length) fila('f', 'Lote o vencimiento distinto', f, partes.join(' · '), 1);
+      if (sin && f.u_estado === 'Cerrado' && aCod(f)) fila('g', 'Sin contar al cerrar la unidad', f, 'la unidad se cerró sin contar esta posición', 1);
+      if (f.estado === 'No ajustado') fila('h', 'No ajustado', f, 'diferencia ' + (dif > 0 ? '+' : '') + dif, Math.abs(dif));
+    });
+    return T.c.concat(T.d, T.e, T.f, T.g, T.h);
+  }
+  // las seis hojas de datos de una toma, las mismas para el archivo TOMA y para el MAESTRO; devuelve cada una por su nombre corto (uni, pa y pc las usa el MAESTRO para sus columnas de ayuda)
+  function hojasDatosToma(wb, toma, filas, unidades, tiempos, idd) {
+    var fecha = fechaDe(toma.abierta_en), origen = MARCA.grande + ' · ' + toma.id + ' · ' + idd, vacio = function (x) { return x === null || x === undefined ? null : x; }, op = {}, h = {};
+    function hoja(nombre, cols, anchos, formatos, datos) {
+      var ws = hojaPlana(wb, nombre, cols, anchos, formatos); datos.forEach(function (r) { ws.addRow(r); });
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } }; return ws;
+    }
+    tiempos.unidades.forEach(function (t) { if (t.es_operador) op[t.unidad] = t; });      // el tiempo de cada unidad es el de su contador (el que la tomó), no el de quien guardó una posición suelta
+    h.pos = hoja('POSICIONES', BASE_COLS, BASE_ANCHOS, BASE_FORMATOS, filas.map(function (f) { return filaBase(toma, f, origen, fecha); }));
+    h.uni = hoja('UNIDADES', UNI_TOMA_COLS, UNI_TOMA_ANCHOS, UNI_TOMA_FORMATOS, unidades.map(function (u) {
+      var t = op[u.id], r = filaExcelUnidad(toma, u, origen, fecha);
+      return r.concat(t ? [horaExcel(t.primero), horaExcel(t.ultimo), vacio(t.min_abierta), vacio(t.huecos), vacio(t.min_pausa), vacio(t.mayor_hueco), vacio(t.ritmo_seg), vacio(t.con_dif)] : [null, null, null, null, null, null, null, null]);
+    }));
+    h.inc = hoja('INCIDENCIAS', INC_COLS, [20, 7, 30, 24, 10, 26, 40, 10, 13, 42], {}, incidenciasToma(toma, filas, origen));
+    h.pc = hoja('POR CÓDIGO', PC_COLS, [20, 10, 34, 12, 12, 42], { 5: F_DIF }, porArticulo(filas).filter(function (a) { return a.sin < a.ubic; })
+      .sort(function (x, y) { return x.cod < y.cod ? -1 : x.cod > y.cod ? 1 : 0; }).map(function (a) { return [toma.id, a.cod, a.desc, a.ubic - a.sin, a.neto, origen]; }));
+    h.fr = hoja('FRANJAS', FRA_COLS, [20, 13, 32, 19, 10, 10, 42], { 4: FMT_HORA }, tiempos.franjas.map(function (x) { return [toma.id, x.contador, x.nombre, horaExcel(x.inicio), x.n, x.guardados, origen]; }));
+    h.pa = hoja('PAUSAS', PAU_COLS, [20, 13, 32, 10, 19, 19, 8, 19, 19, 10, 14, 14, 42], { 5: FMT_HORA, 6: FMT_HORA, 8: FMT_HORA, 9: FMT_HORA }, tiempos.pausas.map(function (x) {
+      return [toma.id, x.contador, x.nombre, x.tipo, horaExcel(x.desde), horaExcel(x.hasta), vacio(x.min), horaExcel(x.desde_srv), horaExcel(x.hasta_srv), x.confirma, x.antes || null, x.despues || null, origen]; }));
+    return h;
+  }
+  function armarToma(toma, filas, unidades, tiempos, archivo, idd) {
+    var wb = new window.ExcelJS.Workbook(), abierta = toma.estado !== 'cerrada';
+    hojasDatosToma(wb, toma, filas, unidades, tiempos, idd);
+    hojaLeeme(wb, 'TOMA de «' + toma.nombre + '»', [
+      ['Qué es', 'Todo lo de UNA toma en un solo archivo, para pegarlo en tu plantilla MAESTRO: seis hojas de datos (POSICIONES, UNIDADES, INCIDENCIAS, POR CÓDIGO, FRANJAS y PAUSAS) con siempre las mismas columnas en el mismo orden. Son valores, sin fórmulas: las cuentas las hace el MAESTRO.'],
       ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgala otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
-      ['Cómo usarla', 'Con la BASE: la BASE dice QUÉ se contó (una fila por posición) y UNIDADES dice QUIÉN y CUÁNTO TARDÓ (una fila por unidad). Se unen por «ID toma» y «Unidad». Copia las filas (sin la fila de títulos) y pégalas debajo de tu propia tabla de unidades.'],
-      ['Columnas', UNI_COLS.join(' · ')],
+      ['Cómo usarla', 'En el MAESTRO, pega cada hoja debajo de la hoja del mismo nombre (sin la fila de títulos). La columna «ID toma» dice de qué toma es cada fila y permite detectar una toma pegada dos veces.'],
+      ['POSICIONES', 'Una fila por posición, siempre las mismas 24 columnas en el mismo orden (las 22 primeras no cambian: hay dashboards que las pegan; al final van «Corregido» y «Motivo corrección»): stock del sistema, contado, diferencia, reconteo, lote y vencimiento reales, situación y estado del ajuste. Sin nombres de personas ni observaciones libres, salvo el motivo de una corrección.'],
+      ['Diferencia', 'Contado − sistema (rojo: menos · azul: más). «Reconteo» y «Dif. reconteo» se llenan solo si esa posición se recontó. Las posiciones «Sin contar» no traen contado ni diferencia.'],
+      ['Situación', 'Contada, Vacía (el contador la marcó vacía) o Sin contar (nadie la contó todavía).'],
+      ['Estado ajuste', 'Conforme (el valor que vale cuadra con el sistema), Ajustado o No ajustado (lo que anotó el ajustador). Vacío si todavía no hay nada que decir.'],
+      ['Celda', 'En un inventario puntual (por código) la celda lleva delante el lugar, por ejemplo «N3-B-MIN · 3BA1», y Nave y Pasillo quedan vacíos. En Modula, Pasillo / Torre dice «Torre 2» y la celda va vacía.'],
+      ['Clave ubicación', 'Identifica la posición entre tomas (pasillo|UDC|POS). Sirve mientras el WMS no cambie sus códigos.'],
+      ['Corregido', '«Sí» si el ajustador o el administrador anuló o corrigió un producto que el contador registró por error; el motivo va en la columna siguiente. Quién lo corrigió no va en esta hoja (está en el respaldo).'],
+      ['UNIDADES', 'Una fila por pasillo, torre, puntual o reconteo: quién lo contó, cuándo lo tomó y lo cerró, cuántos minutos tardó, cuántas posiciones tenía, y quién lo ajustó y cuánto tardó, más 8 columnas de tiempos del contador de la unidad (1.er y último guardado, minutos abierta, huecos de más de ' + UMBRAL_PAUSA + ' minutos, minutos en pausa, mayor hueco, ritmo mediano en segundos entre guardados y posiciones con diferencia). Vacías si esa unidad no tiene guardados.'],
       ['Contador y Ajustador', 'Son el código de usuario con el que entra cada persona (por ejemplo «AndyGu»); la app no guarda nombres reales. Contador = quién contó la unidad; Ajustador = quién la ajustó. En un reconteo, Contador es quien lo recontó.'],
-      ['Tiempos', 'Tomada y Cerrada son la hora de Lima. Minutos = de que se tomó a que se cerró (incluye pausas). Minutos de ajuste = de que se tomó el ajuste a que se terminó. Posiciones y Contadas sirven para calcular posiciones por hora.'],
-      ['Nave y Pasillo / Torre', 'Igual que en la BASE: «Nave 3» y el pasillo; en Modula, Nave dice «Modula» y Pasillo / Torre dice «Torre 2». Un inventario puntual (por código) no tiene nave ni pasillo: su lugar va en la columna Unidad.'],
+      ['Minutos', 'Tomada y Cerrada son la hora de Lima. Minutos = de que se tomó a que se cerró (incluye pausas). Minutos de ajuste = de que se tomó el ajuste a que se terminó. Posiciones y Contadas sirven para calcular posiciones por hora.'],
+      ['Nave y Pasillo / Torre', 'Se escriben igual en POSICIONES y en UNIDADES: «Nave 3» y el pasillo; en Modula, Nave dice «Modula» y Pasillo / Torre dice «Torre 2». Un inventario puntual (por código) no tiene nave ni pasillo: su lugar va en la columna Unidad.'],
       ['Reconteo de, N.º pedido, Pedido por', 'Solo se llenan en las unidades de reconteo: de qué unidad viene, el número del pedido, quién lo pidió y cuándo.'],
+      ['INCIDENCIAS', 'Lo que conviene mirar, una fila por cosa. Tipo c = diferencia grande ⚠ (20 unidades o más, o la mitad del stock con 5 como mínimo), d = reconteo pedido, e = corrección de un registro, f = lote o vencimiento distinto, g = posición sin contar en una unidad ya cerrada, h = diferencia que el ajustador dejó «No ajustado». Responsable = quien abrió la toma.'],
+      ['POR CÓDIGO', 'Diferencia neta de cada código en esta toma, sumando sus ubicaciones contadas (lo que nadie contó no aparece). Sirve para ver qué códigos repiten falta o sobra de una toma a otra.'],
+      ['FRANJAS', 'Cuántos guardados hizo cada contador en cada franja de 15 minutos (hora de Lima), desde que tomó la unidad hasta su último guardado; incluye las franjas sin guardados.'],
+      ['PAUSAS', 'El arranque (de que tomó la unidad al primer guardado) y cada hueco de 3 minutos o más entre dos guardados del mismo contador, con la hora del celular y la del servidor (Confirma servidor = «Sí» si coinciden en ±1 minuto) y entre qué posiciones ocurrió. El MAESTRO decide cuáles cuentan según su umbral.'],
+      ['Límites de los tiempos', 'Un hueco prueba que no hubo guardados, no el porqué (descanso, buscar un producto, una falla de señal o de equipo). No ve qué hace la persona fuera de la app. Úsalo para mejorar el proceso, no como prueba por sí solo.'],
       ['Origen', 'Marca de la app en cada fila: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
       ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
-      ['Confidencial', 'Dice quién contó y quién ajustó cada unidad: son datos de personas. Úsala para mejorar el proceso, no como prueba por sí sola, y no la reenvíes sin permiso. La BASE no lleva personas.']]);
-    marcar(wb, 'UNIDADES de ' + toma.nombre, archivo, idd);
+      ['Confidencial', 'UNIDADES, INCIDENCIAS, FRANJAS y PAUSAS dicen qué código de usuario contó o ajustó cada cosa y a qué hora: son datos de personas (Ley 29733). POSICIONES y POR CÓDIGO no llevan personas. No lo reenvíes sin permiso.']]);
+    marcar(wb, 'TOMA de ' + toma.nombre, archivo, idd);
     return wb.xlsx.writeBuffer();
   }
-  // El servidor entrega cada hoja por trozos de hasta 2.000 filas; aquí se juntan. Las usan el paquete y la BASE.
+  // ---------- archivo MAESTRO: la plantilla con las cuentas ya armada y los datos de ESTA toma (Decisión 77, Fase 3b) ----------
+  // Las cuatro hojas con fórmulas (Dashboard, TIEMPOS, LÍNEA y TOMAS) las construye maestro.js, el MISMO módulo con el que el generador de analisis/ arma y prueba los ejemplos; las seis de datos son las del archivo TOMA.
+  // La app no calcula las fórmulas (HyperFormula es GPL y solo se usa en las pruebas): el archivo sale sin resultados guardados y Excel los calcula al abrirlo. En «Vista protegida» Excel NO calcula, por eso el aviso
+  // de la fila 3 del Dashboard lleva guardado el texto «Habilitar edición». NO es el respaldo: no se registra y no habilita Archivar.
+  function armarMaestro(toma, filas, unidades, tiempos, archivo, idd) {
+    if (!window.Maestro) throw new Error('No se cargó el módulo del MAESTRO. Cierra y abre la app e inténtalo de nuevo.');
+    var abierta = toma.estado !== 'cerrada', wb = new window.ExcelJS.Workbook(), M, h;
+    // las fórmulas miran las hojas de datos por la LETRA de la columna: si el contrato de la app cambió, esto falla ANTES de bajar un archivo que calcularía mal
+    window.Maestro.verificar({ POSICIONES: BASE_COLS, UNIDADES: UNI_TOMA_COLS, INCIDENCIAS: INC_COLS, 'POR CÓDIGO': PC_COLS, FRANJAS: FRA_COLS, PAUSAS: PAU_COLS });
+    M = window.Maestro.crear(window.Maestro.TAM_REAL, { vistaProtegida: true }); wb.calcProperties.fullCalcOnLoad = true;
+    M.hojas(wb); h = hojasDatosToma(wb, toma, filas, unidades, tiempos, idd); M.completar(wb, h);
+    hojaLeeme(wb, 'MAESTRO de «' + toma.nombre + '»', [
+      ['Qué es', 'La plantilla MAESTRO con los datos de ESTA toma ya cargados: cuatro hojas con fórmulas (Dashboard, TIEMPOS, LÍNEA y TOMAS) y seis de datos (POSICIONES, UNIDADES, INCIDENCIAS, POR CÓDIGO, FRANJAS y PAUSAS, las mismas del archivo TOMA). Para ver la historia, pega debajo las demás tomas desde sus archivos TOMA.'],
+      ['Estado de la toma', abierta ? 'Se bajó con la toma ABIERTA: es una foto de este momento, no un cierre. Cuando la cierres, descárgalo otra vez.' : 'La toma estaba cerrada cuando se bajó.'],
+      ['Habilitar edición', 'Las cuentas son fórmulas: Excel las calcula al abrir el archivo, pero NO mientras esté en «Vista protegida» (le pasa a todo archivo descargado). Pulsa «Habilitar edición», arriba, y el Dashboard se llena; hasta entonces se ve vacío.']]
+      .concat(M.leeme(), [
+        ['Origen', 'Marca de la app en cada fila de las hojas de datos: «' + MARCA.grande + ' · ID de la toma · ID de descarga». Viaja con los datos aunque copies solo las filas; el fondo y el encabezado, no.'],
+        ['Marca de agua', 'Cada hoja lleva de fondo «' + MARCA.grande + '» y, al imprimir, el nombre del archivo y el ID de descarga. Sirve para saber de dónde viene el archivo si lo reenvían; no es una protección: el fondo se puede quitar.'],
+        ['Confidencial', 'Contiene datos del almacén y códigos de usuario (quién contó y quién ajustó): guárdalo donde corresponde y no lo reenvíes sin permiso.']]));
+    marcar(wb, 'MAESTRO de ' + toma.nombre, archivo, idd);
+    return wb.xlsx.writeBuffer();
+  }
+  // lo que piden el archivo TOMA y el MAESTRO: las posiciones, las unidades y los tiempos de una toma (el servidor los entrega por separado)
+  function leerTomaCompleta(id) {
+    return Promise.all([cargarExcelJS(), traerPaginas(id, 'excelToma', {}, null), traerPaginas(id, 'paqueteToma', { hoja: 'unidades' }, null), api('tiemposToma', { id: id, umbral: UMBRAL_PAUSA })]).then(function (v) {
+      if (!v[3].ok) throw new Error(v[3].mensaje || 'No se pudieron leer los tiempos de la toma.');
+      return { toma: v[1].primero.toma, posiciones: v[1].filas, unidades: v[2].filas, tiempos: v[3] };
+    });
+  }
+  // El servidor entrega cada hoja por trozos de hasta 2.000 filas; aquí se juntan. Las usan el respaldo, la TOMA y el MAESTRO.
   function traerPaginas(id, accion, extra, alTerminar) {
     var filas = [], primero = null;
     function pagina(desde) {
@@ -731,18 +801,18 @@
   // Una toma cerrada con el paquete al día se puede archivar: se borra de la nube y queda lo que bajaste.
   function paquetesToma() {
     var t = S.tomas; if (!t || !t.length) return '';
-    return '<div class="sec" style="padding:14px 0 6px">Descargas de la toma</div><p class="pie" style="padding:0 0 8px"><b>Descargar BASE</b>: una fila por posición, para tu plantilla maestra o tu dashboard. <b>Descargar UNIDADES</b>: una fila por pasillo, torre o reconteo, con quién lo contó y cuánto tardó (son códigos de usuario: confidencial); también va a la plantilla maestra. <b>Respaldo (para archivar)</b>: el paquete completo, con historial, versiones y eventos; guárdalo, no lo cargues en la plantilla maestra. Cuando la toma esté cerrada y el respaldo bajado, podrás archivarla (se borra de la nube). BASE y UNIDADES no cuentan para archivar.</p><ul class="lista" style="margin:0 -14px">' +
+    return '<div class="sec" style="padding:14px 0 6px">Descargas de la toma</div><p class="pie" style="padding:0 0 8px"><b>Descargar MAESTRO</b>: la plantilla ya armada, con las cuentas y los datos de esta toma; ábrela en Excel de escritorio y pulsa «Habilitar edición» para que calcule. <b>Descargar TOMA</b>: todo lo de la toma en un archivo de 7 hojas (posiciones, unidades con tiempos, incidencias, por código, franjas y pausas), para pegarlo debajo de las tomas anteriores en tu MAESTRO y armar la historia. Los dos dicen qué código de usuario contó o ajustó cada cosa: son confidenciales. <b>Respaldo (para archivar)</b>: el paquete completo, con historial, versiones y eventos; guárdalo, no lo cargues en la plantilla maestra. Cuando la toma esté cerrada y el respaldo bajado, podrás archivarla (se borra de la nube). El MAESTRO y la TOMA no cuentan para archivar, y después de archivar ya no se pueden bajar: guarda uno de los dos antes.</p><ul class="lista" style="margin:0 -14px">' +
       t.slice(0, 5).map(function (x) {
         var arch = !!x.archivada_en, cerr = x.estado === 'cerrada', pq = x.paquete, det;
         if (arch) det = 'Archivada el ' + fecha(x.archivada_en) + ' · ' + x.filas + ' posiciones';
         else det = (cerr ? 'Cerrada' : 'Abierta') + ' · ' + fecha(x.abierta_en) + ' · ' + x.filas + ' posiciones' + (cerr ? (pq ? (pq.al_dia ? ' · paquete bajado ' + hace(pq.bajado_en) : ' · cambió después de bajar el paquete') : ' · paquete sin bajar') : '');
         return '<li class="fila toma"><div class="info"><div class="nom">' + esc(x.nombre) + '</div><div class="det">' + esc(det) + '</div></div><div class="acc">' +
-          (arch ? '' : '<button class="btn peq rel" data-a="paquete" data-id="' + esc(x.id) + '">Respaldo (para archivar)</button>' +
-            '<button class="btn peq gr" data-a="base" data-id="' + esc(x.id) + '">Descargar BASE</button>' +
-            '<button class="btn peq gr" data-a="unidades" data-id="' + esc(x.id) + '">Descargar UNIDADES</button>' +
+          (arch ? '' : '<button class="btn peq rel" data-a="maestro" data-id="' + esc(x.id) + '">Descargar MAESTRO</button>' +
+            '<button class="btn peq gr" data-a="toma" data-id="' + esc(x.id) + '">Descargar TOMA</button>' +
+            '<button class="btn peq gr" data-a="paquete" data-id="' + esc(x.id) + '">Respaldo (para archivar)</button>' +
             (cerr ? '<button class="btn peq pel" data-a="pedirArchivar" data-id="' + esc(x.id) + '"' + (pq && pq.al_dia ? '' : ' disabled') + '>Archivar</button>' : '')) + '</div></li>'; }).join('') + '</ul>';
   }
-  function recargarTomas() { return api('listarTomas').then(function (r) { if (r.ok) { S.tomas = r.tomas; renderConScroll(); } }); }
+  function recargarTomas() { return api('listarTomas').then(function (r) { if (r.ok) { S.tomas = r.tomas; renderFondo(); } }); }
   function adminUsuarios() {
     if (!S.usuarios) return cargando();
     return '<div style="padding:12px 14px"><button class="btn rel ancho" data-a="nuevoUsuario">Nuevo usuario</button></div>' + '<ul class="lista">' + S.usuarios.map(function (u) {
@@ -774,7 +844,8 @@
   function vivoDif(f) { return (f.contado || 0) - (f.stock || 0); }
   function vivoEstado(f) { var d = vivoDif(f); return d === 0 ? 'conforme' : d > 0 ? 'sobrante' : 'faltante'; }
   // diferencia grande (⚠): 20 unidades o más, o la mitad del stock o más con al menos 5 unidades de diferencia (así 1 contra 0 no es ruido)
-  function vivoGrande(f) { var d = Math.abs(vivoDif(f)); return d >= 20 || (d >= 5 && d >= (f.stock || 0) * 0.5); }
+  function difGrande(dif, stock) { var d = Math.abs(dif); return d >= 20 || (d >= 5 && d >= (stock || 0) * 0.5); }   // la usan En vivo y las INCIDENCIAS del archivo TOMA: una sola regla
+  function vivoGrande(f) { return difGrande(vivoDif(f), f.stock); }
   function adminEnVivo() {
     var d = S.vivo; if (!d) return S.errCarga ? '<div class="vacio"><h2>No se pudo cargar</h2><p>' + esc(S.errCarga) + '</p><button class="btn rel" data-a="recargar">Reintentar</button></div>' : cargando();
     if (!d.toma_activa) return '<div class="vacio"><h2>No hay una toma abierta</h2><p>Cuando abras una, aquí verás lo que se va contando.</p></div>';
@@ -1271,6 +1342,10 @@
     render(); window.scrollTo(0, y);
     var n = $app.querySelector('.ajw'); if (n) { n.scrollTop = wt; n.scrollLeft = wl; }
   }
+  // Una respuesta o un aviso que llega solo (la lista de tomas o de unidades, un cambio de señal) no debe redibujar la pantalla bajo el campo donde la persona ya hizo clic para escribir o pegar:
+  // el campo se cambia por uno vacío, el cursor se pierde (y con él lo escrito o el Ctrl+V). Los datos ya quedaron guardados en S y salen en el siguiente dibujo.
+  // En la pantalla de conteo no se redibuja nunca (renderConScroll solo repinta el aviso de conexión), así que ahí no se frena: el aviso tiene que cambiar aunque el cursor esté en una cantidad.
+  function renderFondo() { var a = document.activeElement; if (S.vista !== 'contar' && a && $app.contains(a) && a.matches('textarea,input:not([type=checkbox]):not([type=radio])')) return; renderConScroll(); }
 
   // ---------- acciones ----------
   function mostrarError(el, msg) { var m = $app.querySelector('#msg') || $capa.querySelector('#msg'); if (m) m.innerHTML = '<div class="err" role="alert">' + esc(msg) + '</div>'; else toast(msg); }
@@ -1427,37 +1502,41 @@
         });
       }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el respaldo', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
-    base: function (b) {                          // una sola hoja plana (24 columnas) para el dashboard propio. NO es el paquete: no se registra en el servidor y no habilita Archivar
+    toma: function (b) {                          // todo lo de una toma en un archivo de 7 hojas para el MAESTRO. NO es el respaldo: no se registra en el servidor y no habilita Archivar
       var id = b.dataset.id; ocupar(b, 'Preparando…');
-      Promise.all([cargarExcelJS(), traerPaginas(id, 'excelToma', {}, null)]).then(function (v) {
-        var pos = v[1], toma = pos.primero.toma, archivo = archivoToma('BASE_', toma), idd = idDescarga();
-        return armarBase(toma, pos.filas, archivo, idd).then(function (buf) {
+      leerTomaCompleta(id).then(function (t) {
+        var archivo = archivoToma('TOMA_', t.toma), idd = idDescarga();
+        return armarToma(t.toma, t.posiciones, t.unidades, t.tiempos, archivo, idd).then(function (buf) {
           descargarArchivo(buf, archivo); liberarBoton(b);
-          avisoPaquete('BASE descargada', archivo, 'Tiene ' + pos.filas.length + ' posiciones, una fila cada una. ' + (toma.estado !== 'cerrada'
+          avisoPaquete('TOMA descargada', archivo, 'Tiene ' + t.posiciones.length + ' posiciones y ' + t.unidades.length + ' unidades, en 6 hojas de datos listas para el MAESTRO. ' + (t.toma.estado !== 'cerrada'
             ? 'La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgala otra vez.'
-            : 'La BASE no reemplaza al respaldo: para poder archivar la toma, baja también el respaldo.'));
+            : 'La TOMA no reemplaza al respaldo: para poder archivar la toma, baja también el respaldo.'));
         });
-      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear la BASE', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
+      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear la TOMA', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
-    unidades: function (b) {                      // una fila por pasillo, torre o reconteo (quién contó y cuánto tardó) para la plantilla maestra. NO es el respaldo: no se registra en el servidor y no habilita Archivar
-      var id = b.dataset.id, toma = (S.tomas || []).filter(function (x) { return x.id === id; })[0]; if (!toma) return toast('Actualiza la lista de tomas e inténtalo de nuevo.');
-      ocupar(b, 'Preparando…');
-      Promise.all([cargarExcelJS(), traerPaginas(id, 'paqueteToma', { hoja: 'unidades' }, null)]).then(function (v) {
-        var archivo = archivoToma('UNIDADES_', toma), idd = idDescarga();
-        return armarUnidades(toma, v[1].filas, archivo, idd).then(function (buf) {
+    maestro: function (b) {                       // la plantilla MAESTRO ya armada con los datos de esta toma. NO es el respaldo: no se registra en el servidor y no habilita Archivar
+      var id = b.dataset.id; ocupar(b, 'Preparando…');
+      leerTomaCompleta(id).then(function (t) {
+        var archivo = archivoToma('MAESTRO_', t.toma), idd = idDescarga();
+        return armarMaestro(t.toma, t.posiciones, t.unidades, t.tiempos, archivo, idd).then(function (buf) {
           descargarArchivo(buf, archivo); liberarBoton(b);
-          avisoPaquete('UNIDADES descargadas', archivo, 'Tiene ' + v[1].filas.length + ' unidades (pasillos, torres, puntuales y reconteos), una fila cada una. ' + (toma.estado !== 'cerrada'
-            ? 'La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalas otra vez.'
-            : 'Las UNIDADES no reemplazan al respaldo: para poder archivar la toma, baja también el respaldo.'));
+          avisoPaquete('MAESTRO descargado', archivo, 'Trae esta toma (' + t.posiciones.length + ' posiciones y ' + t.unidades.length + ' unidades) con las cuentas ya armadas. Ábrelo en Excel de escritorio y pulsa «Habilitar edición» para que calcule: hasta entonces el Dashboard se ve vacío. ' + (t.toma.estado !== 'cerrada'
+            ? 'La toma sigue abierta: es una foto de este momento, no un cierre. Cuando cierres la toma, descárgalo otra vez.'
+            : 'El MAESTRO no reemplaza al respaldo: para poder archivar la toma, baja también el respaldo.'));
         });
-      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear la hoja UNIDADES', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
+      }).catch(function (e) { liberarBoton(b); avisoPaquete('No se pudo crear el MAESTRO', '', (e && e.message) || 'Revisa tu conexión e inténtalo de nuevo.', true); });
     },
     pedirArchivar: function (b) {
       var t = (S.tomas || []).filter(function (x) { return x.id === b.dataset.id; })[0]; if (!t) return;
-      confirmar('Archivar «' + t.nombre + '»', 'Se borran de la nube las posiciones, los conteos, las unidades y las anotaciones de esta toma. Quedan su nombre, sus fechas, sus totales y su historial de eventos. No se puede deshacer: antes, abre el archivo que bajaste y comprueba que está completo.',
-        'Archivar', 'archivar', t.id, '<div class="campo"><label for="nomArch">Escribe el nombre de la toma para confirmar</label><input id="nomArch" autocomplete="off" autocapitalize="none" spellcheck="false"></div>');
+      // Decisión 74: recordatorio y archivar a mano. La app no puede saber si el archivo quedó bien guardado en la computadora, así que lo pregunta; después de archivar la TOMA y el MAESTRO ya no se pueden bajar.
+      confirmar('Archivar «' + t.nombre + '»', 'Se borran de la nube las posiciones, los conteos, las unidades y las anotaciones de esta toma. Quedan su nombre, sus fechas, sus totales y su historial de eventos. No se puede deshacer, y después ya no se pueden bajar el respaldo, la TOMA ni el MAESTRO de esta toma.',
+        'Archivar', 'archivar', t.id, '<div class="rec"><label><input type="checkbox" id="rec1"><span>Abrí el respaldo que bajé y comprobé que está completo.</span></label>' +
+        '<label><input type="checkbox" id="rec2"><span>Guardé la TOMA o el MAESTRO de esta toma, porque después ya no se pueden bajar.</span></label></div>' +
+        '<div class="campo"><label for="nomArch">Escribe el nombre de la toma para confirmar</label><input id="nomArch" autocomplete="off" autocapitalize="none" spellcheck="false"></div>');
     },
     archivar: function (b) {
+      var r1 = $capa.querySelector('#rec1'), r2 = $capa.querySelector('#rec2');
+      if (!r1 || !r2 || !r1.checked || !r2.checked) return mostrarError(null, 'Marca las dos casillas: son lo que evita perder datos.');
       var inp = $capa.querySelector('#nomArch'), nombre = inp ? inp.value : '';
       if (!nombre.trim()) return mostrarError(null, 'Escribe el nombre de la toma.');
       ocupar(b, 'Archivando…');
@@ -1491,7 +1570,20 @@
       if (p && ya !== true) { modal('<h3>Tienes conteos sin enviar</h3><p>' + p + (p === 1 ? ' conteo todavía no llegó' : ' conteos todavía no llegaron') + ' al servidor. Si sales ahora quedan guardados en este celular y se enviarán cuando ingreses de nuevo con tu usuario.</p><div id="msg"></div><div class="botones"><button class="btn gr" data-a="cerrarModal">Cancelar</button><button class="btn rel" data-a="enviarYSalir">Enviar ahora</button></div><div style="margin-top:10px"><button class="btn pel ancho" data-a="salirYa">Salir sin enviar</button></div>'); return; }
       cerrarModal(); var t = S.ses && S.ses.token; api('logout', { token: t }).then(function () {}); S.aviso = ''; salirLocal(); CM = {}; },
     menu: function () {
-      modal('<h3>' + esc(S.ses.usuario) + '</h3><p>' + esc(S.ses.rol) + ' · versión ' + VERSION + '</p><div style="display:flex;flex-direction:column;gap:10px"><button class="btn gr ancho" data-a="irPin">Cambiar mi PIN</button><button class="btn pel ancho" data-a="salir">Cerrar sesión</button><button class="btn gr ancho" data-a="cerrarModal">Cerrar</button></div>');
+      modal('<h3>' + esc(S.ses.usuario) + '</h3><p>' + esc(S.ses.rol) + ' · versión ' + VERSION + '</p><div style="display:flex;flex-direction:column;gap:10px"><button class="btn gr ancho" data-a="irPin">Cambiar mi PIN</button><button class="btn gr ancho" data-a="avisoDatos">Qué guarda esta app sobre ti</button><button class="btn pel ancho" data-a="salir">Cerrar sesión</button><button class="btn gr ancho" data-a="cerrarModal">Cerrar</button></div>');
+    },
+    // Aviso a quien cuenta (Ley 29733): qué guarda la app sobre él. La redacción la aprueban Daniel y la empresa; no afirma nada legal ni reemplaza el aviso formal de la empresa.
+    // Hechos comprobados en el código: la cámara solo lee el código de barras (no guarda ni envía imágenes), no hay GPS ni datos del dispositivo, el ajustador y el administrador ven quién contó cada posición,
+    // y a los otros contadores la lista les muestra quién tiene tomado un pasillo. Se abre también sin haber ingresado (pantalla de ingreso).
+    avisoDatos: function () {
+      modal('<h3>Qué guarda esta app sobre ti</h3><p>BenitoStock lleva el registro del inventario. Para eso guarda esto cuando cuentas:</p>' +
+        '<ul class="qg"><li>Tu usuario y la hora de tu último ingreso.</li>' +
+        '<li>Por cada posición que cuentas: la cantidad, el lote y el vencimiento si los anotas, y la hora de tu celular y la del servidor. Si cambias un conteo, también quedan las versiones anteriores.</li>' +
+        '<li>Cuándo tomas y cierras cada pasillo, torre o lista.</li></ul>' +
+        '<p>Con esas horas se calcula cuánto tarda cada pasillo y el tiempo entre un guardado y el siguiente.</p>' +
+        '<p><b>No guarda</b> tu ubicación ni fotos ni video: la cámara solo lee el código de barras en tu celular.</p>' +
+        '<p>Lo ven el administrador y el ajustador del pasillo, que saben quién contó cada posición. Los otros contadores solo ven quién tiene tomado cada pasillo.</p>' +
+        '<div class="botones"><button class="btn rel" data-a="cerrarModal">Entendido</button></div>');
     },
     irPin: function () { cerrarModal(); S.vista = 'pin'; render(); },
 
@@ -1678,7 +1770,7 @@
       });
     } else if (tipo === 'hist') { S.filtroHist = v.q || ''; buscarHistorial(); }
   });
-  window.addEventListener('online', function () { S.online = true; renderConScroll(); flush(true).then(function () { if (S.ses && S.vista === 'contar' && CT.fuera && $capa.className !== 'on') cargarConteo(); }); if (S.ses && S.vista === 'home') cargarSegunVista(true); });
+  window.addEventListener('online', function () { S.online = true; renderFondo(); flush(true).then(function () { if (S.ses && S.vista === 'contar' && CT.fuera && $capa.className !== 'on') cargarConteo(); }); if (S.ses && S.vista === 'home') cargarSegunVista(true); });
   var tq = {}, tp;
   document.addEventListener('input', function (e) {
     var t = e.target; if (!t.matches) return;
@@ -1727,7 +1819,7 @@
   setInterval(function () { if (!document.hidden && S.ses && S.vista === 'ajuste' && $capa.className !== 'on') cargarAjuste(true); }, (CFG.REFRESCO_SEG || 20) * 1000);
   document.addEventListener('visibilitychange', function () { if (document.hidden) flush(true); });
   window.addEventListener('pagehide', function () { flush(true); });
-  window.addEventListener('offline', function () { S.online = false; renderConScroll(); });
+  window.addEventListener('offline', function () { S.online = false; renderFondo(); });
 
   // actualización automática de la lista (solo con la pantalla visible y sin ventanas abiertas)
   setInterval(function () {

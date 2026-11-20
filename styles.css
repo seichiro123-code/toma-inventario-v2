@@ -140,6 +140,15 @@ button{cursor:pointer}
 .hoja p{margin:0 0 14px;color:var(--tx2)}
 .hoja .botones{display:flex;gap:10px;margin-top:14px}
 .hoja .botones .btn{flex:1;min-height:50px;font-size:19px}
+.hoja ul.qg{margin:0 0 14px;padding-left:20px;color:var(--tx2)}
+.hoja ul.qg li{margin:0 0 8px}
+.hoja p b{color:var(--tx)}
+/* recordatorio de archivar: dos casillas grandes (se tocan con guantes) */
+.rec{display:flex;flex-direction:column;gap:10px;margin:2px 0 14px}
+.rec label{display:flex;gap:12px;align-items:flex-start;min-height:48px;padding:10px 12px;border:1.5px solid var(--borde);border-radius:10px;background:var(--pan);color:var(--tx);font:500 16px/1.35 var(--f-txt);cursor:pointer}
+.rec input{flex:none;width:24px;height:24px;margin:1px 0 0;accent-color:var(--amb)}
+/* enlace del ingreso: «Más información» */
+.pie .enlace{display:block;min-height:44px;margin-top:2px;padding:0;background:none;border:0;color:var(--amb);font:600 15px var(--f-txt);text-align:left;text-decoration:underline;cursor:pointer}
 .pinbox{font:500 34px var(--f-mono);letter-spacing:6px;text-align:center;background:var(--bg);border:1.5px dashed var(--amb);color:var(--amb);border-radius:6px;padding:14px;margin:10px 0}
 #aviso{position:fixed;left:50%;top:calc(76px + env(safe-area-inset-top));transform:translateX(-50%);max-width:92%;background:#E8EEF4;color:#0C131B;font-weight:600;padding:11px 16px;border-radius:8px;z-index:30;display:none;pointer-events:none;box-shadow:0 6px 24px rgba(0,0,0,.5)}
 #aviso.on{display:block}
