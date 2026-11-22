@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.22';
+  var CFG = window.CONFIG, VERSION = 'F4.23';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -198,18 +198,19 @@
     if (modo === 'contador') {
       if (u.mia) acc = '<button class="btn rel" data-a="tomar" data-id="' + esc(u.id) + '">Continuar</button>';
       else if (u.estado === 'Pendiente' && u.reconteo && u.puedes_tomar === false) acc = '<span class="est">Lo cuenta otra persona</span>';
-      else if (u.estado === 'Pendiente') acc = '<button class="btn" data-a="pedirTomar" data-id="' + esc(u.id) + '"' + (bloqueado ? ' disabled' : '') + '>Tomar</button>';
+      else if (u.estado === 'Pendiente') acc = '<button class="btn" data-a="pedirTomar" data-id="' + esc(u.id) + '"' + (bloqueado && (u.reconteo ? bloqueado.r : bloqueado.p) ? ' disabled' : '') + '>Tomar</button>';
       else if (u.estado === 'Cerrado' || u.estado === 'Ajustado' || u.estado === 'En ajuste') acc = '<span class="est ok">' + esc(u.estado) + '</span>';
       else acc = '<span class="est">Bloqueado</span>';
     } else if (modo === 'admin') {
       var hechas = S.av && S.av.contadas ? (S.av.contadas[u.id] || 0) : null, id = esc(u.id);
-      if (hechas !== null && (u.estado === 'En conteo' || u.estado === 'Cerrado')) sub += ' · ' + hechas + ' de ' + u.filas;
-      if (u.estado === 'En conteo') acc = '<div class="acc"><button class="btn peq" data-a="pedirCerrarAdm" data-id="' + id + '">Cerrar</button><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button><button class="btn pel peq" data-a="pedirLiberar" data-id="' + id + '">Liberar</button></div>';
+      var aMedias = u.estado === 'Pendiente' && !u.reconteo && hechas > 0;          // liberado con parte contada
+      if (hechas !== null && (u.estado === 'En conteo' || u.estado === 'Cerrado' || aMedias)) sub += ' · ' + hechas + ' de ' + u.filas;      if (u.estado === 'En conteo') acc = '<div class="acc"><button class="btn peq" data-a="pedirCerrarAdm" data-id="' + id + '">Cerrar</button><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button><button class="btn pel peq" data-a="pedirLiberar" data-id="' + id + '">Liberar</button></div>';
       else if (u.estado === 'Cerrado') {
         if (u.ajustador) sub += ' · ' + (u.ajuste_estado === 'ajustado' ? 'Ajustado por ' : 'Ajusta ') + esc(u.ajustador);
         acc = '<div class="acc"><span class="est ok">Cerrado</span><button class="btn gr peq" data-a="verCambios" data-id="' + id + '">Cambios</button>' +
           (u.ajustador ? '<button class="btn pel peq" data-a="pedirLiberarAjuste" data-id="' + id + '">Liberar ajuste</button>' : '<button class="btn peq" data-a="pedirReabrir" data-id="' + id + '">Reabrir</button>') + '</div>';
       }
+      else if (aMedias) acc = '<div class="acc"><span class="est">Pendiente</span><button class="btn peq" data-a="pedirCerrarContado" data-id="' + id + '">Cerrar con lo contado</button></div>';
       else acc = '<span class="est' + (u.estado === 'Pendiente' ? '' : ' ok') + '">' + esc(u.estado) + '</span>';
     } else if (modo === 'ajuste') {
       var yo = S.ses.usuario, ae = u.ajuste_estado, uid = esc(u.id), ver = '<button class="btn gr peq" data-a="abrirAjuste" data-id="' + uid + '">Ver</button>';
@@ -236,18 +237,21 @@
     var un = S.datos.unidades.filter(function (u) { return modo !== 'ajuste' || !u.reconteo; }), tabs = agrupar(un);   // el ajustador ve las unidades originales; los reconteos van dentro
     if (!tabs.length) return vacioToma();
     if (!S.tab || !tabs.some(function (t) { return t.id === S.tab; })) {
-      var mia = un.filter(function (u) { return u.mia; })[0];
+      var mia = un.filter(function (u) { return u.mia && !u.reconteo; })[0] || un.filter(function (u) { return u.mia; })[0];
       S.tab = mia ? tabDe(mia) : tabs[0].id; S.zona = null;
     }
     var lista = unidadesDeTab(un, S.tab), zonas = [];
     lista.forEach(function (u) { if (u.zona && u.tipo === 'pasillo' && zonas.indexOf(u.zona) < 0) zonas.push(u.zona); });
     if (zonas.length > 1) { if (!S.zona || zonas.indexOf(S.zona) < 0) S.zona = zonas[0]; lista = lista.filter(function (u) { return u.zona === S.zona; }); }
-    var miUnidad = un.filter(function (u) { return u.mia; })[0], bloqueado = modo === 'contador' && !!miUnidad;
+    // un contador puede tener su pasillo y, además, un reconteo en conteo (Decisión 82)
+    var miUnidad = un.filter(function (u) { return u.mia && !u.reconteo; })[0], miRec = un.filter(function (u) { return u.mia && u.reconteo; })[0];
+    var bloqueado = modo === 'contador' ? { p: !!miUnidad, r: !!miRec } : false;
     var miAjuste = modo === 'ajuste' ? un.filter(function (u) { return u.ajustador === S.ses.usuario && u.ajuste_estado === 'en_ajuste'; })[0] : null;
     if (miAjuste) bloqueado = true;
     return '<nav class="tabs" role="tablist">' + tabs.map(function (t) { return '<button class="tab" role="tab" aria-selected="' + (t.id === S.tab) + '" data-a="tab" data-id="' + t.id + '">' + esc(t.nombre) + '</button>'; }).join('') + '</nav>' +
       (zonas.length > 1 ? '<div class="seg" role="group">' + zonas.map(function (z) { return '<button aria-pressed="' + (z === S.zona) + '" data-a="zona" data-id="' + z + '">' + z.charAt(0) + z.slice(1).toLowerCase() + '</button>'; }).join('') + '</div>' : '') +
-      (modo === 'contador' && bloqueado ? '<div class="aviso" style="margin:12px 14px 0">Tienes en conteo <b>' + esc(miUnidad.nombre) + '</b>. Termínala antes de tomar otra.</div>' : '') +
+      (modo === 'contador' && miUnidad ? '<div class="aviso" style="margin:12px 14px 0">Tienes en conteo <b>' + esc(miUnidad.nombre) + '</b>. Termínala antes de tomar otra. Un reconteo sí puedes tomarlo sin cerrarla.</div>' : '') +
+      (modo === 'contador' && miRec ? '<div class="aviso" style="margin:12px 14px 0">Tienes el reconteo <b>' + esc(nombreUnidad(miRec)) + '</b>. Termínalo antes de tomar otro.</div>' : '') +
       (miAjuste ? '<div class="aviso" style="margin:12px 14px 0">Estás ajustando <b>' + esc(miAjuste.nombre) + '</b>. Termina de ajustar ese pasillo antes de tomar otro.</div>' : '') +
       '<ul class="lista">' + lista.map(function (u) { return filaUnidad(u, modo, bloqueado); }).join('') + '</ul>' +
       (modo === 'contador' ? '<p class="pie">Un pasillo tomado queda bloqueado para los demás.</p>' : '');
@@ -1636,6 +1640,18 @@
         cerrarModal(); toast('Unidad cerrada.'); cargarSegunVista();
       });
     },
+    // Decisión 83: un pasillo liberado a medias se cierra con lo contado para poder ajustarlo; lo demás queda «Sin contar».
+    pedirCerrarContado: function (b) {
+      var u = unidadPorId(b.dataset.id), h = S.av && S.av.contadas ? (S.av.contadas[b.dataset.id] || 0) : 0;
+      confirmar('Cerrar ' + nombreUnidad(u) + ' con lo contado', 'Tiene ' + h + ' de ' + (u && u.filas) + ' posiciones contadas. Las demás quedan sin contar. Después lo tomas en Ajuste. Si luego falta contar el resto, libera el ajuste y reabre el pasillo.', 'Cerrar con lo contado', 'cerrarContado', b.dataset.id);
+    },
+    cerrarContado: function (b) {
+      ocupar(b, 'Cerrando…');
+      api('cerrarUnidad', { id: b.dataset.id, forzar: true }).then(function (r) {
+        if (!r.ok) { liberarBoton(b); return mostrarError(null, r.mensaje); }
+        cerrarModal(); toast('Pasillo cerrado con lo contado. Ya puedes tomarlo en Ajuste.'); cargarSegunVista();
+      });
+    },
     pedirReabrir: function (b) {
       var u = unidadPorId(b.dataset.id);
       confirmar('Reabrir ' + nombreUnidad(u), 'Vuelve a ' + (u && u.operador) + ' con los conteos como estaban. Escribe el motivo; queda en el historial.', 'Reabrir', 'reabrir', b.dataset.id,
@@ -1833,8 +1849,8 @@
   // Atrás sube un nivel dentro de la app. Solo en la pantalla principal pregunta si de verdad quieres salir.
   var SALIENDO = false;
   function textoSalida() {
-    var mia = (S.datos && S.datos.unidades ? S.datos.unidades : []).filter(function (u) { return u.mia; })[0], p = pendientes().length, t = [];
-    if (mia) t.push('Tienes <b>' + esc(nombreUnidad(mia)) + '</b> en conteo, sin cerrar.');
+    var mias = (S.datos && S.datos.unidades ? S.datos.unidades : []).filter(function (u) { return u.mia; }), p = pendientes().length, t = [];
+    if (mias.length) t.push('Tienes <b>' + mias.map(function (u) { return esc(nombreUnidad(u)); }).join('</b> y <b>') + '</b> en conteo, sin cerrar.');
     if (p) t.push('Hay <b>' + p + '</b> conteo' + (p === 1 ? '' : 's') + ' sin enviar; se enviarán cuando vuelvas a abrir la app con tu usuario.');
     return t.length ? t.join(' ') + ' ¿Seguro que quieres salir?' : '¿Seguro que quieres salir de la aplicación?';
   }
