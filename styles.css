@@ -255,7 +255,7 @@ button{cursor:pointer}
 .vseg{flex-wrap:wrap}
 .vivosel{min-height:44px;border-radius:6px;background:var(--pan);border:1px solid var(--borde);color:var(--tx);padding:0 8px;font-size:16px}
 .ajt.vivo{min-width:1000px}
-@media (min-width:900px){.ajw.vivow{max-height:calc(100vh - 405px);min-height:240px;overflow:auto}}   /* en la computadora la tabla se desplaza por dentro y la cabecera queda fija */
+@media (min-width:900px){.ajw.vivow{max-height:calc(100vh - 405px);min-height:240px;overflow:auto}.ajw.vivow.concruce{max-height:calc(100vh - 470px)}}   /* en la computadora la tabla se desplaza por dentro y la cabecera queda fija */
 .ajt.vivo tr.gr td{background:#3a2410}
 .vest{display:inline-block;font:700 12px/1 var(--f-txt);letter-spacing:.4px;text-transform:uppercase;padding:5px 8px;border-radius:4px;border:1px solid var(--line)}
 .vest.ver{background:#05140c;color:var(--ver);border-color:#14502f}
@@ -267,3 +267,14 @@ button{cursor:pointer}
 .vsel{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:0 14px 10px}
 .vsel .vivosel{flex:1 1 150px;min-width:0}
 .vseg{margin:12px 14px 8px}
+/* Cruces mal ubicados (Decisión 86) */
+.cruces{background:var(--pan);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:0 0 12px}
+.cruces h3{margin:0 0 4px;font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--amb)}
+.cruce{border-top:1px solid var(--line);padding:10px 0}
+.cr2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
+.cr2 ul{margin:4px 0 0;padding-left:16px;font-size:13px}
+.cr3{font-size:14px;color:var(--tx2)}
+.cruce .acc{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.cruces summary{cursor:pointer;padding:10px 0;min-height:44px;font-weight:700}
+details.cruces>summary{padding:0;color:var(--amb);text-transform:uppercase;letter-spacing:.4px;font-size:14px;display:flex;align-items:center}
+@media (max-width:560px){.cr2{grid-template-columns:1fr}}

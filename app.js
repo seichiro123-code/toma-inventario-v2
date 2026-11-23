@@ -1,7 +1,7 @@
 ﻿/* Toma de inventario · F4.0 — servidor Supabase (Fase 3c). Datos pegados desde Excel; sin Google Sheets. */
 (function () {
   'use strict';
-  var CFG = window.CONFIG, VERSION = 'F4.23';
+  var CFG = window.CONFIG, VERSION = 'F4.24';
   var S = { ses: null, vista: 'login', datos: null, tab: null, zona: null, adminTab: 'avance', usuarios: null, historial: null,
             informe: null, modoCarga: 'normal', pegado: '', pegadoBarras: '', nombreToma: '', ocupado: false, lentos: 0, errCarga: '', online: navigator.onLine, aviso: '', filtroHist: '' };
   var $app = document.getElementById('app'), $capa = document.getElementById('capa'), $aviso = document.getElementById('aviso');
@@ -29,7 +29,7 @@
   function esActivo(v) { return v === true || String(v).toLowerCase() === 'true'; }
 
   // ---------- comunicación con el servicio ----------
-  var LECTURAS = { datosAjuste: 1, avance: 1, cambiosUnidad: 1, articulos: 1, posicionesUnidad: 1, yo: 1, listarUnidades: 1, listarUsuarios: 1, historial: 1, validarDatos: 1, listarTomas: 1, excelToma: 1, paqueteToma: 1 };
+  var LECTURAS = { cruces: 1, datosAjuste: 1, avance: 1, cambiosUnidad: 1, articulos: 1, posicionesUnidad: 1, yo: 1, listarUnidades: 1, listarUsuarios: 1, historial: 1, validarDatos: 1, listarTomas: 1, excelToma: 1, paqueteToma: 1 };
   var ESPERAS = [2000, 4000, 8000];            // pausas entre reintentos de lecturas (servidor dormido o celular sin red aún)
   function espera(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
   function pintarEstado() { var e = document.getElementById('estado'); if (e) e.className = S.lentos > 0 ? 'on' : ''; }
@@ -93,6 +93,7 @@
   }
   function cargarSegunVista(silencioso) {
     if (!S.ses || S.vista !== 'home') return;
+    if (S.ses.rol === 'ajustador' || (S.ses.rol === 'administrador' && (S.adminTab === 'vivo' || S.adminTab === 'ajuste'))) cargarCruces(silencioso);
     if (S.ses.rol === 'administrador') {
       if (S.adminTab === 'usuarios') return api('listarUsuarios').then(function (r) { if (r.ok) { S.errCarga = ''; S.usuarios = r.usuarios; renderConScroll(); } else if (!S.usuarios) { S.errCarga = r.mensaje; render(); } else toast(r.mensaje); });
       if (S.adminTab === 'historial') return buscarHistorial();
@@ -101,6 +102,45 @@
       if (S.adminTab === 'carga') api('listarTomas').then(function (r) { if (r.ok && JSON.stringify(r.tomas) !== JSON.stringify(S.tomas)) { S.tomas = r.tomas; renderFondo(); } });
     }
     return cargarUnidades(silencioso);
+  }
+  // ---------- CRUCES MAL UBICADOS (Decisión 86): un código SOBRA en un lugar y FALTA en otro de la misma toma ----------
+  // Lo ven el administrador (En vivo y Ajuste) y el ajustador; el contador nunca (trae el stock del sistema). Lo que se guarda es solo el estado.
+  function cargarCruces() {
+    return api('cruces').then(function (r) {
+      if (!r.ok) return;
+      var igual = JSON.stringify(r) === JSON.stringify(S.cruces); S.cruces = r; S.cruceFila = {};
+      (r.cruces || []).forEach(function (c) { if (c.estado === 'No es cruce') return; c.sobrantes.concat(c.faltantes).forEach(function (p) { S.cruceFila[p.fila_id] = c; }); });
+      if (!igual) renderFondo();
+    });
+  }
+  function cruceChip(id) {
+    var c = S.cruceFila && S.cruceFila[id]; if (!c) return '';
+    return ' <span class="pill am" title="El código ' + esc(c.codigo) + ' sobra en un lugar y falta en otro">' + (c.estado === 'Movido' ? 'cruce movido' : c.estado === 'Tomado' ? 'cruce · ' + esc(c.tomado_por) : 'cruce') + '</span>';
+  }
+  function cruceLado(arr) {
+    return arr.map(function (p) { return '<li><span class="mono">' + esc(p.lugar) + ' · ' + esc(p.celda) + ' · UDC ' + esc(String(p.udc)) + ' · POS ' + esc(String(p.pos)) + '</span> (' + (p.dif > 0 ? '+' : '') + p.dif + (p.contador ? ' · contó ' + esc(p.contador) : '') + (p.lote ? ' · lote ' + esc(p.lote) : '') + ')</li>'; }).join('');
+  }
+  function cruceCaja(c) {
+    var yo = S.ses.usuario, adm = S.ses.rol === 'administrador', mio = c.tomado_por === yo, b = function (a, t, e) { return '<button class="btn peq" data-a="' + a + '" data-id="' + esc(c.codigo) + '"' + (e ? ' data-e="' + e + '"' : '') + '>' + t + '</button>'; };
+    var acc = c.estado === 'Pendiente' ? b('tomarCruce', 'Tomar') + (adm ? b('marcarCruce', 'Movido', 'Movido') + b('marcarCruce', 'No es cruce', 'No es cruce') : '')
+      : c.estado === 'Tomado' ? (mio || adm ? b('marcarCruce', 'Movido', 'Movido') + b('marcarCruce', 'No es cruce', 'No es cruce') + b('marcarCruce', 'Soltar', 'Pendiente') : '<span class="pie">Lo atiende ' + esc(c.tomado_por) + '</span>')
+      : (adm || mio ? b('marcarCruce', 'Reabrir', 'Pendiente') : '');
+    return '<div class="cruce" data-cruce="' + esc(c.codigo) + '"><div class="cr1"><b class="mono">' + esc(c.codigo) + '</b> <span>' + esc(c.descripcion || '') + '</span> <span class="pill ' + (c.estado === 'Pendiente' ? 'am' : c.estado === 'Tomado' ? 'ad' : '') + '">' + esc(c.estado) + (c.estado === 'Tomado' ? ' · ' + esc(c.tomado_por) : '') + '</span></div>' +
+      '<div class="cr2"><div><b>Sobran ' + c.sobran + '</b><ul>' + cruceLado(c.sobrantes) + '</ul></div><div><b>Faltan ' + c.faltan + '</b><ul>' + cruceLado(c.faltantes) + '</ul></div></div>' +
+      '<div class="cr3">Cruce de <b>' + c.cruce + '</b>' + (c.resto ? '; quedan ' + c.resto + (c.sobran > c.faltan ? ' de más' : ' de menos') + ' que no se compensan' : '') + '.' + (c.lote_distinto ? ' <span class="pill am">lote distinto</span> Al mover, corrige el lote en el sistema.' : '') + '</div>' +
+      '<div class="acc">' + acc + '</div></div>';
+  }
+  // la caja compacta recuerda si está abierta aunque la pantalla se redibuje (el evento toggle no burbujea: se escucha en la captura)
+  document.addEventListener('toggle', function (e) { var d = e.target; if (d && d.matches && d.matches('details.cruces')) S.crAbierto = d.open; }, true);
+  // compacta = en «En vivo» (ahí manda la tabla): una sola línea que se despliega; en las listas de ajuste va abierta
+  function cajaCruces(compacta) {
+    var d = S.cruces; if (!d || !d.toma_activa || !d.cruces.length) return '';
+    var vivos = d.cruces.filter(function (c) { return c.estado === 'Pendiente' || c.estado === 'Tomado'; }), cerr = d.cruces.filter(function (c) { return c.estado !== 'Pendiente' && c.estado !== 'Tomado'; });
+    var titulo = 'Cruces mal ubicados · ' + vivos.length + ' por resolver', cuerpo = '<p class="pie">Un código sobra en un lugar y falta en otro: lo normal es mover el físico y no ajustar cada lado por separado.</p>' +
+      (vivos.map(cruceCaja).join('') || '<p class="pie">Ninguno pendiente.</p>') +
+      (cerr.length ? '<details><summary>Resueltos (' + cerr.length + ')</summary>' + cerr.map(cruceCaja).join('') + '</details>' : '');
+    return compacta ? '<details class="cruces"' + (S.crAbierto ? ' open' : '') + '><summary>' + (vivos.length ? '⚠ ' : '') + titulo + '</summary>' + cuerpo + '</details>'
+      : '<section class="cruces" aria-label="Cruces mal ubicados"><h3>' + titulo + '</h3>' + cuerpo + '</section>';
   }
   function buscarHistorial() {
     return api('historial', { filtro: S.filtroHist }).then(function (r) { if (r.ok) { S.errCarga = ''; S.historial = r.eventos; renderConScroll(); } else if (!S.historial) { S.errCarga = r.mensaje; render(); } else toast(r.mensaje); });
@@ -265,7 +305,7 @@
   function vistaAjustador() {
     var d = S.datos, cuerpo;
     if (!d) cuerpo = cargando(); else if (!d.toma_activa) cuerpo = vacioToma();
-    else cuerpo = listaPorTabs('ajuste') + '<p class="pie">Toma un pasillo ya contado para ajustarlo: queda a tu nombre y nadie más puede anotar en él. Con «Ver» solo miras.</p>';
+    else cuerpo = cajaCruces() + listaPorTabs('ajuste') + '<p class="pie">Toma un pasillo ya contado para ajustarlo: queda a tu nombre y nadie más puede anotar en él. Con «Ver» solo miras.</p>';
     return '<main class="pantalla">' + cabecera('Ajustes', S.ses.usuario + ' · ajustador') + '<div class="cuerpo">' + cuerpo + '</div></main>';
   }
   var AJ = { id: '', datos: null, sel: {}, filtro: 'todas', cur: null, err: '', verCompletos: false };
@@ -299,7 +339,7 @@
     var r = aRecon(f), puede = ed && f.contado !== null && !aEnRecon(f), cod = aCod(f), conf = aConforme(f);
     return '<tr data-fila="' + esc(f.id) + '"' + (AJ.cur === f.id ? ' class="sel"' : '') + '>' +
       '<td class="ck"><input type="checkbox" data-k="' + esc(f.id) + '"' + (AJ.sel[f.id] ? ' checked' : '') + (puede ? '' : ' disabled') + ' aria-label="Recontar ' + esc(cod) + '"></td>' +
-      '<td class="mono">' + esc(cod) + (!f.codigo && cod ? ' <span class="pill am">nuevo</span>' : '') + '</td>' +
+      '<td class="mono">' + esc(cod) + (!f.codigo && cod ? ' <span class="pill am">nuevo</span>' : '') + cruceChip(f.id) + '</td>' +
       '<td>' + esc(aDesc(f) || (f.codigo_reg ? 'Registrado por el contador' : '')) + '</td><td>' + esc(f.udc) + '</td><td>' + esc(f.celda) + '</td><td>' + esc(f.pos) + '</td>' +
       '<td>' + esc(aLote(f)) + '</td><td>' + esc(aVcto(f) ? fmtVcto(aVcto(f)) : '') + '</td>' +
       '<td class="n">' + aCant(f.sistema) + '</td><td class="n' + aClase(f.contado, f.sistema) + '">' + aCant(f.contado) + '</td>' +
@@ -369,7 +409,7 @@
     return '<main class="pantalla">' + cabecera(titulo + ' · Ajustes', sub + (sub ? ' · ' : '') + S.ses.usuario, false, true) + '<div class="cuerpo">' + cuerpo + '</div></main>';
   }
   function cargarAjuste(silencioso) {
-    var id = AJ.id;
+    var id = AJ.id; cargarCruces();
     return api('datosAjuste', { id: id }).then(function (r) {
       if (S.vista !== 'ajuste' || AJ.id !== id) return;
       if (!r.ok) { if (!AJ.datos) { AJ.err = r.mensaje || 'No se pudo cargar.'; render(); } else if (!silencioso) toast(r.mensaje || 'No se pudo actualizar.'); return; }
@@ -748,7 +788,7 @@
   // el administrador ajusta como un ajustador: toma un pasillo contado y queda a su nombre (misma lista y misma tabla que el ajustador)
   function adminAjuste() {
     var d = S.datos; if (!d) return cargando(); if (!d.toma_activa) return vacioToma();
-    return listaPorTabs('ajuste') + '<p class="pie">Toma un pasillo ya contado para ajustarlo: queda a tu nombre y nadie más puede anotar en él. Con «Ver» solo miras.</p>';
+    return cajaCruces() + listaPorTabs('ajuste') + '<p class="pie">Toma un pasillo ya contado para ajustarlo: queda a tu nombre y nadie más puede anotar en él. Con «Ver» solo miras.</p>';
   }
   function kb(n) { return Math.max(1, Math.round(n / 1024)) + ' KB'; }
   function cajaPegado(id, titulo, ayuda, valor) {
@@ -882,9 +922,9 @@
     }).join('');
     return '<div class="tarjetas cuatro"><div class="tj"><small>Contadas</small><b>' + r.contadas + '</b></div><div class="tj ver"><small>Conformes</small><b>' + r.conformes + '</b></div>' +
       '<div class="tj rojo"><small>Sobrantes</small><b>' + r.sobrantes + '</b></div><div class="tj amb"><small>Faltantes</small><b>' + r.faltantes + '</b></div></div>' +
-      '<div class="seg vseg" role="group">' + chips + '</div>' + sel +
+      cajaCruces(true) + '<div class="seg vseg" role="group">' + chips + '</div>' + sel +
       '<div class="pie" style="padding:0 14px 8px">Se actualiza sola cada 15 segundos · ' + vis.length + ' de ' + d.filas.length + ' filas' + (d.resumen.contadas > d.filas.length ? ' (las ' + d.filas.length + ' más recientes)' : '') + '</div>' +
-      '<div class="ajw vivow"><table class="ajt vivo"><thead><tr><th>Hora</th><th>Contador</th><th>Unidad</th><th>Celda · UDC · POS</th><th>Código</th><th>Descripción</th><th>Lote</th><th>Vcto</th><th class="n">Contado</th><th class="n">Stock</th><th class="n">Dif.</th><th>Estado</th><th class="n">Veces</th></tr></thead><tbody>' +
+      '<div class="ajw vivow' + (S.cruces && S.cruces.toma_activa && S.cruces.cruces.length ? ' concruce' : '') + '"><table class="ajt vivo"><thead><tr><th>Hora</th><th>Contador</th><th>Unidad</th><th>Celda · UDC · POS</th><th>Código</th><th>Descripción</th><th>Lote</th><th>Vcto</th><th class="n">Contado</th><th class="n">Stock</th><th class="n">Dif.</th><th>Estado</th><th class="n">Veces</th></tr></thead><tbody>' +
       (filas || '<tr><td colspan="13" class="pie">No hay filas con este filtro.</td></tr>') + '</tbody></table></div>';
   }
   function vistaAdmin() {
@@ -1641,6 +1681,11 @@
       });
     },
     // Decisión 83: un pasillo liberado a medias se cierra con lo contado para poder ajustarlo; lo demás queda «Sin contar».
+    tomarCruce: function (b) { api('tomarCruce', { codigo: b.dataset.id }).then(function (r) { toast(r.ok ? 'Cruce tomado: es tuyo.' : r.mensaje); cargarCruces(); }); },
+    marcarCruce: function (b) {
+      var e = b.dataset.e;
+      api('marcarCruce', { codigo: b.dataset.id, estado: e }).then(function (r) { toast(r.ok ? (e === 'Movido' ? 'Cruce marcado como movido.' : e === 'Pendiente' ? 'Cruce de nuevo pendiente.' : 'Marcado: no es cruce.') : r.mensaje); cargarCruces(); });
+    },
     pedirCerrarContado: function (b) {
       var u = unidadPorId(b.dataset.id), h = S.av && S.av.contadas ? (S.av.contadas[b.dataset.id] || 0) : 0;
       confirmar('Cerrar ' + nombreUnidad(u) + ' con lo contado', 'Tiene ' + h + ' de ' + (u && u.filas) + ' posiciones contadas. Las demás quedan sin contar. Después lo tomas en Ajuste. Si luego falta contar el resto, libera el ajuste y reabre el pasillo.', 'Cerrar con lo contado', 'cerrarContado', b.dataset.id);
